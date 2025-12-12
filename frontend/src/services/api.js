@@ -27,7 +27,6 @@ export const deleteVendor = (id) => api.delete(`/vendors/${id}`);
 // Proposal APIs
 export const createProposal = (data) => api.post('/proposals', data);
 export const getProposalsByRFP = (rfpId) => api.get(`/proposals/rfp/${rfpId}`);
-export const fetchVendorEmails = (rfpId) => api.post(`/proposals/fetch/${rfpId}`);
 export const compareProposals = (rfpId) => api.get(`/proposals/compare/${rfpId}`);
 export const updateProposal = (id, data) => api.put(`/proposals/${id}`, data);
 export const deleteProposal = (id) => api.delete(`/proposals/${id}`);

@@ -12,14 +12,18 @@ import {
   CheckCircle2,
   AlertCircle,
   RefreshCw,
+  Wifi,
+  Search,
+  FileCheck,
+  XCircle,
 } from "lucide-react";
 import {
   getRFPById,
   getProposalsByRFP,
   compareProposals,
-  fetchVendorEmails,
   createProposal,
 } from "../services/api";
+import { useEmailFetchSSE } from "../hooks/useEmailFetchSSE";
 
 const ProposalComparison = () => {
   const { id } = useParams();
@@ -29,7 +33,6 @@ const ProposalComparison = () => {
   const [comparison, setComparison] = useState(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
-  const [fetchingEmails, setFetchingEmails] = useState(false);
   const [showManualForm, setShowManualForm] = useState(false);
   const [manualProposal, setManualProposal] = useState({
     vendorId: "",
@@ -40,6 +43,16 @@ const ProposalComparison = () => {
     type: "",
     message: "",
   });
+
+  // SSE hook for email fetching
+  const {
+    isLoading: fetchingEmails,
+    progress: emailProgress,
+    error: emailError,
+    fetchEmails: fetchEmailsSSE,
+    cancel: cancelFetch,
+    reset: resetFetch,
+  } = useEmailFetchSSE();
 
   const showNotification = (type, message) => {
     setNotification({ show: true, type, message });
@@ -89,23 +102,46 @@ const ProposalComparison = () => {
   };
 
   const handleFetchEmails = async () => {
-    setFetchingEmails(true);
     try {
-      const response = await fetchVendorEmails(id);
-      const count = response.data?.proposals?.length || 0;
-      showNotification(
-        "success",
-        count > 0 ? `Found ${count} new proposal(s)!` : "No new proposals found"
-      );
-      fetchData();
+      const result = await fetchEmailsSSE(id, {
+        onComplete: (data) => {
+          const count = data?.newProposals || 0;
+          showNotification(
+            "success",
+            count > 0 ? `Found ${count} new proposal(s)!` : "No new proposals found"
+          );
+          fetchData();
+        },
+        onError: (errorMessage) => {
+          showNotification(
+            "error",
+            errorMessage || "Failed to fetch emails. Check email configuration."
+          );
+        }
+      });
     } catch (error) {
       console.error("Error fetching emails:", error);
-      showNotification(
-        "error",
-        "Failed to fetch emails. Check email configuration."
-      );
-    } finally {
-      setFetchingEmails(false);
+      // Error handling is done in onError callback
+    }
+  };
+
+  // Helper function to get the appropriate icon for each stage
+  const getStageIcon = (stage) => {
+    switch (stage) {
+      case 'connecting':
+      case 'initializing':
+        return <Wifi className="text-blue-400" size={18} />;
+      case 'searching':
+        return <Search className="text-cyan-400" size={18} />;
+      case 'parsing':
+      case 'processing':
+        return <FileCheck className="text-purple-400" size={18} />;
+      case 'complete':
+        return <CheckCircle2 className="text-green-400" size={18} />;
+      case 'error':
+        return <XCircle className="text-red-400" size={18} />;
+      default:
+        return <Mail className="text-blue-400" size={18} />;
     }
   };
 
@@ -141,11 +177,10 @@ const ProposalComparison = () => {
       {notification.show && (
         <div className={`fixed top-6 right-6 z-500 animate-slide-up max-w-sm`}>
           <div
-            className={`flex items-center space-x-3 px-5 py-4 rounded-xl shadow-2xl border ${
-              notification.type === "success"
-                ? "bg-green-900/90 border-green-500/50 text-green-100"
-                : "bg-red-900/90 border-red-500/50 text-red-100"
-            }`}
+            className={`flex items-center space-x-3 px-5 py-4 rounded-xl shadow-2xl border ${notification.type === "success"
+              ? "bg-green-900/90 border-green-500/50 text-green-100"
+              : "bg-red-900/90 border-red-500/50 text-red-100"
+              }`}
           >
             {notification.type === "success" ? (
               <CheckCircle2
@@ -181,59 +216,51 @@ const ProposalComparison = () => {
         </div>
       )}
 
-      {/* Email Fetching Modal */}
+      {/* Email Fetching Background Toast - Non-blocking */}
       {fetchingEmails && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in">
-          <div className="bg-gradient-to-br from-slate-900 to-blue-900/80 rounded-2xl p-8 border border-blue-500/30 shadow-2xl max-w-md w-full mx-4 animate-scale-in">
-            <div className="text-center">
-              <div className="relative mx-auto w-20 h-20 mb-6">
-                <div className="absolute inset-0 rounded-full border-4 border-blue-500/20"></div>
-                <div className="absolute inset-0 rounded-full border-4 border-blue-400 border-t-transparent animate-spin"></div>
-                <div
-                  className="absolute inset-2 rounded-full border-4 border-cyan-400/30 border-b-transparent animate-spin"
-                  style={{
-                    animationDirection: "reverse",
-                    animationDuration: "1.5s",
-                  }}
-                ></div>
-                <Mail
-                  className="absolute inset-0 m-auto text-blue-400"
-                  size={28}
-                />
+        <div className="fixed bottom-6 right-6 z-50 animate-slide-up">
+          <div className="bg-gradient-to-br from-slate-900 to-blue-900/90 rounded-xl p-4 border border-blue-500/30 shadow-2xl w-80 backdrop-blur-sm">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center space-x-2">
+                <div className="relative w-6 h-6">
+                  <div className="absolute inset-0 rounded-full border-2 border-blue-400 border-t-transparent animate-spin"></div>
+                  <Mail className="absolute inset-0 m-auto text-blue-400" size={12} />
+                </div>
+                <span className="text-sm font-semibold text-white">Fetching Emails</span>
               </div>
-              <h3 className="text-2xl font-bold text-white mb-2">
-                Fetching Vendor Emails
-              </h3>
-              <p className="text-gray-400 mb-4">
-                Connecting to mailbox and searching for responses...
-              </p>
-              <div className="space-y-2 text-left bg-black/30 rounded-xl p-4">
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                  <span className="text-sm text-gray-300">
-                    Connecting to IMAP server...
-                  </span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <div
-                    className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"
-                    style={{ animationDelay: "0.5s" }}
-                  ></div>
-                  <span className="text-sm text-gray-300">
-                    Searching for RFP replies...
-                  </span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <div
-                    className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"
-                    style={{ animationDelay: "1s" }}
-                  ></div>
-                  <span className="text-sm text-gray-300">
-                    Parsing email content with AI...
-                  </span>
-                </div>
+              <button
+                onClick={() => {
+                  cancelFetch();
+                  showNotification("info", "Email fetch cancelled");
+                }}
+                className="p-1 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+              >
+                <XCircle size={16} />
+              </button>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="mb-2">
+              <div className="flex justify-between text-xs text-gray-400 mb-1">
+                <span className="flex items-center space-x-1">
+                  {getStageIcon(emailProgress.stage)}
+                  <span className="capitalize ml-1">{emailProgress.stage || "Starting"}</span>
+                </span>
+                <span>{emailProgress.percentage || 0}%</span>
+              </div>
+              <div className="h-2 bg-blue-900/50 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${emailProgress.percentage || 0}%` }}
+                ></div>
               </div>
             </div>
+
+            {/* Status Message */}
+            <p className="text-xs text-gray-400 truncate">
+              {emailProgress.message || "Initializing..."}
+            </p>
           </div>
         </div>
       )}

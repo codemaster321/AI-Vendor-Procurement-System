@@ -2,7 +2,99 @@ import Proposal from '../models/Proposal.js';
 import RFP from '../models/RFP.js';
 import Vendor from '../models/Vendor.js';
 import { parseVendorResponse, compareProposals } from '../services/aiService.js';
-import { fetchEmails } from '../services/emailService.js';
+import { fetchEmailsWithProgress } from '../services/emailService.js';
+
+/**
+ * SSE endpoint for fetching vendor emails with real-time progress
+ * Uses Server-Sent Events to stream progress updates to the client
+ */
+export const fetchVendorEmailsSSE = async (req, res) => {
+    const { rfpId } = req.params;
+
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+    res.flushHeaders();
+
+    // Helper to send SSE events
+    const sendEvent = (event, data) => {
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+        // Validate RFP exists
+        sendEvent('progress', { stage: 'initializing', percentage: 0, message: 'Validating RFP...' });
+
+        const rfp = await RFP.findById(rfpId).populate('vendors');
+        if (!rfp) {
+            sendEvent('error', { message: 'RFP not found' });
+            res.end();
+            return;
+        }
+
+        sendEvent('progress', { stage: 'initializing', percentage: 5, message: `Processing RFP: ${rfp.title}` });
+
+        // Fetch emails with progress callback
+        const emails = await fetchEmailsWithProgress('UNSEEN', (stage, percentage, message, data) => {
+            sendEvent('progress', { stage, percentage, message, ...data });
+        });
+
+        // Process matched emails
+        sendEvent('progress', { stage: 'processing', percentage: 90, message: 'Matching emails with vendors...' });
+
+        const processed = [];
+        const newProposals = [];
+
+        for (const email of emails) {
+            const vendor = rfp.vendors.find(v => email.from.includes(v.email));
+
+            if (vendor) {
+                const existingProposal = await Proposal.findOne({ rfpId, vendorId: vendor._id });
+
+                if (!existingProposal) {
+                    sendEvent('progress', {
+                        stage: 'processing',
+                        percentage: 92,
+                        message: `Parsing proposal from ${vendor.name}...`
+                    });
+
+                    const parsedData = await parseVendorResponse(email.text, rfp);
+
+                    const proposal = new Proposal({
+                        rfpId,
+                        vendorId: vendor._id,
+                        rawEmail: email.text,
+                        parsedData
+                    });
+
+                    await proposal.save();
+                    processed.push({ vendor: vendor.name, status: 'created' });
+                    newProposals.push(proposal);
+                } else {
+                    processed.push({ vendor: vendor.name, status: 'already exists' });
+                }
+            }
+        }
+
+        // Send completion event
+        sendEvent('complete', {
+            message: 'Email processing complete',
+            results: processed,
+            proposals: newProposals,
+            totalFound: emails.length,
+            newProposals: newProposals.length
+        });
+
+    } catch (error) {
+        console.error('SSE Error:', error);
+        sendEvent('error', { message: error.message || 'Failed to fetch emails' });
+    } finally {
+        res.end();
+    }
+};
 
 // Create proposal manually
 export const createProposal = async (req, res) => {
@@ -36,51 +128,6 @@ export const createProposal = async (req, res) => {
     }
 };
 
-// Fetch and process vendor emails
-export const fetchVendorEmails = async (req, res) => {
-    try {
-        const { rfpId } = req.params;
-
-        const rfp = await RFP.findById(rfpId).populate('vendors');
-        if (!rfp) {
-            return res.status(404).json({ message: 'RFP not found' });
-        }
-
-        // Fetch emails
-        const emails = await fetchEmails();
-
-        const processed = [];
-        for (const email of emails) {
-            // Try to match email with vendors
-            const vendor = rfp.vendors.find(v => email.from.includes(v.email));
-
-            if (vendor) {
-                // Check if proposal already exists
-                const existingProposal = await Proposal.findOne({ rfpId, vendorId: vendor._id });
-
-                if (!existingProposal) {
-                    const parsedData = await parseVendorResponse(email.text, rfp);
-
-                    const proposal = new Proposal({
-                        rfpId,
-                        vendorId: vendor._id,
-                        rawEmail: email.text,
-                        parsedData
-                    });
-
-                    await proposal.save();
-                    processed.push({ vendor: vendor.name, status: 'created' });
-                } else {
-                    processed.push({ vendor: vendor.name, status: 'already exists' });
-                }
-            }
-        }
-
-        res.json({ message: 'Emails processed', results: processed });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
 
 // Get proposals for an RFP
 export const getProposalsByRFP = async (req, res) => {

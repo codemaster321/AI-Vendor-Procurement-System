@@ -55,7 +55,14 @@ Procurement Team
     }
 };
 
-export const fetchEmails = async (searchCriteria = 'UNSEEN') => {
+
+
+/**
+ * Fetch emails with progress callbacks for SSE streaming
+ * @param {string} searchCriteria - IMAP search criteria
+ * @param {function} onProgress - Callback function (stage, percentage, message, data?)
+ */
+export const fetchEmailsWithProgress = async (searchCriteria = 'UNSEEN', onProgress = () => { }) => {
     const imaps = (await import('imap-simple')).default;
     const { simpleParser } = await import('mailparser');
 
@@ -75,15 +82,21 @@ export const fetchEmails = async (searchCriteria = 'UNSEEN') => {
     };
 
     try {
+        // Stage 1: Connecting
+        onProgress('connecting', 5, 'Connecting to mail server...');
         console.log('Connecting to Gmail IMAP...');
         const connection = await imaps.connect(config);
         console.log('IMAP connection successful');
+        onProgress('connecting', 15, 'Connected to mail server');
 
         await connection.openBox('INBOX');
+        onProgress('connecting', 20, 'Opened inbox');
 
         const since = new Date();
         since.setDate(since.getDate() - 7);
 
+        // Stage 2: Searching
+        onProgress('searching', 25, 'Searching for vendor replies...');
         console.log('Searching for emails from last 7 days...');
         const searchCriteriaArray = ['UNSEEN', ['SINCE', since]];
 
@@ -92,14 +105,21 @@ export const fetchEmails = async (searchCriteria = 'UNSEEN') => {
             markSeen: false
         });
 
-        console.log(`Found ${messages.length} unread messages`);
+        const totalFound = messages.length;
+        onProgress('searching', 35, `Found ${totalFound} unread messages`);
+        console.log(`Found ${totalFound} unread messages`);
 
         const reversedMessages = messages.reverse();
         const limitedMessages = reversedMessages.slice(0, 20);
-        console.log(`Processing ${limitedMessages.length} newest emails...`);
+        const totalToProcess = limitedMessages.length;
+        onProgress('searching', 40, `Processing ${totalToProcess} newest emails...`);
+        console.log(`Processing ${totalToProcess} newest emails...`);
 
-        const emails = [];
-        for (const message of limitedMessages) {
+        // Stage 3: Parsing - Use parallel processing with Promise.all
+        onProgress('parsing', 45, 'Parsing email content...');
+
+        // Parse all emails in parallel for faster processing
+        const parsePromises = limitedMessages.map(async (message, index) => {
             const all = message.parts.find(part => part.which === '');
             const id = message.attributes.uid;
             const idHeader = "Imap-Id: " + id + "\r\n";
@@ -114,23 +134,47 @@ export const fetchEmails = async (searchCriteria = 'UNSEEN') => {
             const isSentByUs = fromAddress.includes(process.env.EMAIL_USER.toLowerCase());
 
             if (isReply && !isSentByUs) {
-                emails.push({
+                return {
                     uid: id,
                     from: parsed.from.text,
                     subject: parsed.subject,
                     date: parsed.date,
                     text: parsed.text,
                     html: parsed.html
-                });
-                console.log(`Vendor reply from: ${parsed.from.text}`);
+                };
             }
-        }
+            return null;
+        });
+
+        // Track progress as emails are parsed
+        let parsedCount = 0;
+        const results = await Promise.all(
+            parsePromises.map(async (promise) => {
+                const result = await promise;
+                parsedCount++;
+                const parseProgress = 45 + Math.round((parsedCount / totalToProcess) * 40);
+                onProgress('parsing', parseProgress, `Parsed ${parsedCount} of ${totalToProcess} emails`);
+                return result;
+            })
+        );
+
+        // Filter out null results (non-RFP emails)
+        const emails = results.filter(email => email !== null);
+
+        emails.forEach(email => {
+            console.log(`Vendor reply from: ${email.from}`);
+        });
 
         connection.end();
+
+        // Stage 4: Complete
+        onProgress('complete', 100, `Found ${emails.length} vendor replies`, { count: emails.length });
         console.log(`Successfully fetched ${emails.length} RFP-related emails`);
+
         return emails;
     } catch (error) {
         console.error('Error fetching emails:', error.message);
+        onProgress('error', 0, error.message);
 
         if (error.message.includes('Invalid credentials') || error.message.includes('AUTHENTICATIONFAILED')) {
             console.error('Check EMAIL_USER and EMAIL_PASS in .env - use App Password for Gmail');
