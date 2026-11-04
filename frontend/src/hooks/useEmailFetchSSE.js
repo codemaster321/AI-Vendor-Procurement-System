@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 
-const API_BASE_URL = 'http://localhost:5000/api';
+import { API_BASE_URL } from '../services/api';
 
 /**
  * Custom hook for SSE-based email fetching with real-time progress

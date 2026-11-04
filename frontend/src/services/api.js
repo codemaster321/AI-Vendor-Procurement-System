@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:5000/api';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
 const api = axios.create({
     baseURL: API_BASE_URL,
@@ -8,6 +8,29 @@ const api = axios.create({
         'Content-Type': 'application/json',
     },
 });
+
+// Attach the JWT to every request. (Setting axios.defaults in AuthContext does not
+// reach this instance — axios.create() copies defaults at creation time.)
+api.interceptors.request.use((config) => {
+    const token = localStorage.getItem('token');
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
+});
+
+// Expired / invalid session: clear it and send the user to login
+api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (error.response?.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            if (!['/login', '/signup'].includes(window.location.pathname)) {
+                window.location.assign('/login');
+            }
+        }
+        return Promise.reject(error);
+    }
+);
 
 // RFP APIs
 export const createRFP = (data) => api.post('/rfps', data);
