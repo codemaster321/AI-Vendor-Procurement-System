@@ -17,11 +17,19 @@ connectDB();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Behind Vercel's / a host's proxy: use X-Forwarded-For for client IPs (rate limiting)
+app.set('trust proxy', 1);
+
 // Security middleware
 app.use(helmet());
 
+// FRONTEND_URL may be a comma-separated list of allowed origins
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
+    .split(',')
+    .map((o) => o.trim().replace(/\/$/, ''))
+    .filter(Boolean);
 const corsOptions = {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -58,6 +66,12 @@ app.get('/', (req, res) => {
     res.send('RFP Manager API');
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+// On Vercel the exported app is invoked as a serverless function;
+// everywhere else, start a normal HTTP server.
+if (!process.env.VERCEL) {
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+}
+
+export default app;

@@ -13,7 +13,8 @@ const connectDB = async () => {
         await Vendor.syncIndexes();
     } catch (error) {
         console.error(`Error: ${error.message}`);
-        process.exit(1);
+        // A serverless function must not kill its runtime; locally, fail fast.
+        if (!process.env.VERCEL) process.exit(1);
     }
 };
 
