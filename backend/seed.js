@@ -3,6 +3,8 @@ import dotenv from 'dotenv';
 import Vendor from './models/Vendor.js';
 import RFP from './models/RFP.js';
 import Proposal from './models/Proposal.js';
+import User from './models/User.js';
+import { applyDnsServers } from './config/dns.js';
 
 dotenv.config();
 
@@ -205,16 +207,33 @@ const vendorDatabase = [
 const seedDatabase = async () => {
     try {
         console.log('🔌 Connecting to MongoDB...');
+        applyDnsServers();
         await mongoose.connect(process.env.MONGO_URI);
         console.log('✅ Connected to MongoDB!');
 
-        console.log('\n🗑️  Clearing existing data...');
-        await Vendor.deleteMany({});
-        await RFP.deleteMany({});
-        await Proposal.deleteMany({});
+        // Data is per-user. Seed into an existing account (npm run seed -- you@example.com)
+        // or into a local demo account.
+        const ownerEmail = (process.argv[2] || process.env.SEED_USER_EMAIL || 'demo@rfpmanager.local').toLowerCase();
+        let user = await User.findOne({ email: ownerEmail });
+        if (!user) {
+            if (ownerEmail !== 'demo@rfpmanager.local') {
+                throw new Error(`No user with email ${ownerEmail}. Sign up first, or run without an email to use the demo account.`);
+            }
+            user = await User.create({ name: 'Demo User', email: ownerEmail, password: 'demo1234', company: 'Demo Co' });
+            console.log('👤 Created demo account: demo@rfpmanager.local / demo1234');
+        }
+        const owner = user._id;
+        console.log(`👤 Seeding data for ${user.email}`);
+
+        await Vendor.syncIndexes();
+
+        console.log('\n🗑️  Clearing existing data for this user...');
+        await Vendor.deleteMany({ owner });
+        await RFP.deleteMany({ owner });
+        await Proposal.deleteMany({ owner });
 
         console.log('\n👥 Creating comprehensive vendor database...');
-        const vendors = await Vendor.insertMany(vendorDatabase);
+        const vendors = await Vendor.insertMany(vendorDatabase.map((v) => ({ ...v, owner })));
         console.log(`✅ Created ${vendors.length} vendors across ${[...new Set(vendorDatabase.map(v => v.category))].length} categories`);
 
         // Show categories
@@ -227,6 +246,7 @@ const seedDatabase = async () => {
 
         console.log('\n📝 Creating sample RFP...');
         const rfp = await RFP.create({
+            owner,
             title: 'Office Laptop & Monitor Procurement',
             description: 'Procurement of laptops and monitors for new office setup. Requirements include business-grade laptops with minimum 16GB RAM and 27-inch monitors.',
             budget: 50000,
@@ -257,6 +277,7 @@ const seedDatabase = async () => {
         console.log('\n📧 Creating sample proposals...');
         const proposals = await Proposal.insertMany([
             {
+                owner,
                 rfpId: rfp._id,
                 vendorId: vendors.find(v => v.name === 'Dell Technologies')._id,
                 rawEmail: `Dear Team,
@@ -301,6 +322,7 @@ Dell Sales Team`,
                 status: 'Pending'
             },
             {
+                owner,
                 rfpId: rfp._id,
                 vendorId: vendors.find(v => v.name === 'HP Enterprise')._id,
                 rawEmail: `Hello,
@@ -339,6 +361,7 @@ HP Enterprise Team`,
                 status: 'Pending'
             },
             {
+                owner,
                 rfpId: rfp._id,
                 vendorId: vendors.find(v => v.name === 'Lenovo Corporation')._id,
                 rawEmail: `Dear Procurement Team,

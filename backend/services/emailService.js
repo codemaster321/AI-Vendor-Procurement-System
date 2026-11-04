@@ -1,61 +1,79 @@
-import dotenv from 'dotenv';
+/**
+ * Tag added to every outgoing RFP subject. Mail clients keep it when replying
+ * ("Re: RFP: Laptops [Ref: 65f…]"), which lets us match replies to the right RFP.
+ */
+export const rfpReference = (rfpId) => `[Ref: ${rfpId}]`;
 
-dotenv.config();
+const requireEmailConfig = () => {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+        throw new Error('Email is not configured: set EMAIL_USER and EMAIL_PASS in backend/.env');
+    }
+};
+
+const formatItem = (item, idx) => {
+    const parts = [`${idx + 1}. ${item.name}`];
+    if (item.quantity !== undefined && item.quantity !== null) parts.push(`(Qty: ${item.quantity})`);
+    let line = parts.join(' ');
+    if (item.specs) line += ` - ${item.specs}`;
+    return line;
+};
 
 export const sendRFPEmail = async (vendorEmail, rfpDetails) => {
+    requireEmailConfig();
     const nodemailer = (await import('nodemailer')).default;
 
     const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
             user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
-        }
+            pass: process.env.EMAIL_PASS,
+        },
     });
 
-    const emailContent = `
-Dear Vendor,
+    const items = rfpDetails.items?.length
+        ? rfpDetails.items.map(formatItem).join('\n')
+        : 'See description above.';
 
-We are pleased to share the following Request for Proposal (RFP):
-
-Title: ${rfpDetails.title}
-Description: ${rfpDetails.description}
-Budget: ${rfpDetails.budget ? `${rfpDetails.currency} ${rfpDetails.budget}` : 'Not specified'}
-Deadline: ${rfpDetails.deadline ? new Date(rfpDetails.deadline).toLocaleDateString() : 'Not specified'}
-
-Items Required:
-${rfpDetails.items.map((item, idx) => `${idx + 1}. ${item.name} (Qty: ${item.quantity}) - ${item.specs}`).join('\n')}
-
-Please submit your proposal including:
-- Itemized pricing
-- Delivery timeline
-- Payment terms
-- Warranty details
-
-Please reply to this email with your proposal.
-
-Best regards,
-Procurement Team
-    `;
+    const lines = [
+        'Dear Vendor,',
+        '',
+        'We are pleased to share the following Request for Proposal (RFP):',
+        '',
+        `Title: ${rfpDetails.title}`,
+        `Description: ${rfpDetails.description}`,
+        `Budget: ${rfpDetails.budget ? `${rfpDetails.currency || 'USD'} ${Number(rfpDetails.budget).toLocaleString()}` : 'Not specified'}`,
+        `Deadline: ${rfpDetails.deadline ? new Date(rfpDetails.deadline).toLocaleDateString() : 'Not specified'}`,
+    ];
+    if (rfpDetails.paymentTerms) lines.push(`Payment terms: ${rfpDetails.paymentTerms}`);
+    if (rfpDetails.warranty) lines.push(`Warranty: ${rfpDetails.warranty}`);
+    lines.push(
+        '',
+        'Items Required:',
+        items,
+        '',
+        'Please submit your proposal including:',
+        '- Itemized pricing',
+        '- Delivery timeline',
+        '- Payment terms',
+        '- Warranty details',
+        '',
+        'Please reply to this email with your proposal and keep the subject line unchanged.',
+        '',
+        'Best regards,',
+        'Procurement Team'
+    );
 
     const mailOptions = {
         from: process.env.EMAIL_USER,
         to: vendorEmail,
-        subject: `RFP: ${rfpDetails.title}`,
-        text: emailContent
+        subject: `RFP: ${rfpDetails.title} ${rfpReference(rfpDetails._id)}`,
+        text: lines.join('\n'),
     };
 
-    try {
-        const info = await transporter.sendMail(mailOptions);
-        console.log('Email sent:', info.response);
-        return { success: true, messageId: info.messageId };
-    } catch (error) {
-        console.error('Error sending email:', error);
-        throw error;
-    }
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Email sent:', info.response);
+    return { success: true, messageId: info.messageId };
 };
-
-
 
 /**
  * Fetch emails with progress callbacks for SSE streaming
@@ -63,30 +81,30 @@ Procurement Team
  * @param {function} onProgress - Callback function (stage, percentage, message, data?)
  */
 export const fetchEmailsWithProgress = async (searchCriteria = 'UNSEEN', onProgress = () => { }) => {
+    requireEmailConfig();
     const imaps = (await import('imap-simple')).default;
     const { simpleParser } = await import('mailparser');
 
+    const host = process.env.IMAP_HOST || 'imap.gmail.com';
     const config = {
         imap: {
             user: process.env.EMAIL_USER,
             password: process.env.EMAIL_PASS,
-            host: 'imap.gmail.com',
-            port: 993,
+            host,
+            port: Number(process.env.IMAP_PORT) || 993,
             tls: true,
             authTimeout: 10000,
-            tlsOptions: {
-                rejectUnauthorized: false,
-                servername: 'imap.gmail.com'
-            }
-        }
+            // Certificate verification stays ON — this connection carries the mailbox password
+            tlsOptions: { servername: host },
+        },
     };
 
+    const ownAddress = process.env.EMAIL_USER.toLowerCase();
+    let connection;
+
     try {
-        // Stage 1: Connecting
         onProgress('connecting', 5, 'Connecting to mail server...');
-        console.log('Connecting to Gmail IMAP...');
-        const connection = await imaps.connect(config);
-        console.log('IMAP connection successful');
+        connection = await imaps.connect(config);
         onProgress('connecting', 15, 'Connected to mail server');
 
         await connection.openBox('INBOX');
@@ -95,93 +113,67 @@ export const fetchEmailsWithProgress = async (searchCriteria = 'UNSEEN', onProgr
         const since = new Date();
         since.setDate(since.getDate() - 7);
 
-        // Stage 2: Searching
         onProgress('searching', 25, 'Searching for vendor replies...');
-        console.log('Searching for emails from last 7 days...');
-        const searchCriteriaArray = ['UNSEEN', ['SINCE', since]];
-
-        const messages = await connection.search(searchCriteriaArray, {
-            bodies: ['HEADER', 'TEXT', ''],
-            markSeen: false
+        const messages = await connection.search([searchCriteria, ['SINCE', since]], {
+            bodies: [''],
+            markSeen: false,
         });
 
         const totalFound = messages.length;
         onProgress('searching', 35, `Found ${totalFound} unread messages`);
-        console.log(`Found ${totalFound} unread messages`);
 
-        const reversedMessages = messages.reverse();
-        const limitedMessages = reversedMessages.slice(0, 20);
+        const limitedMessages = messages.reverse().slice(0, 50);
         const totalToProcess = limitedMessages.length;
         onProgress('searching', 40, `Processing ${totalToProcess} newest emails...`);
-        console.log(`Processing ${totalToProcess} newest emails...`);
 
-        // Stage 3: Parsing - Use parallel processing with Promise.all
         onProgress('parsing', 45, 'Parsing email content...');
 
-        // Parse all emails in parallel for faster processing
-        const parsePromises = limitedMessages.map(async (message, index) => {
-            const all = message.parts.find(part => part.which === '');
-            const id = message.attributes.uid;
-            const idHeader = "Imap-Id: " + id + "\r\n";
-
-            const parsed = await simpleParser(idHeader + all.body);
-
-            const subject = parsed.subject || '';
-            const isReply = subject.toLowerCase().startsWith('re:') ||
-                subject.toLowerCase().includes('re: rfp');
-
-            const fromAddress = parsed.from?.text?.toLowerCase() || '';
-            const isSentByUs = fromAddress.includes(process.env.EMAIL_USER.toLowerCase());
-
-            if (isReply && !isSentByUs) {
-                return {
-                    uid: id,
-                    from: parsed.from.text,
-                    subject: parsed.subject,
-                    date: parsed.date,
-                    text: parsed.text,
-                    html: parsed.html
-                };
-            }
-            return null;
-        });
-
-        // Track progress as emails are parsed
         let parsedCount = 0;
         const results = await Promise.all(
-            parsePromises.map(async (promise) => {
-                const result = await promise;
+            limitedMessages.map(async (message) => {
+                const all = message.parts.find((part) => part.which === '');
+                const parsed = await simpleParser(all.body);
+
                 parsedCount++;
-                const parseProgress = 45 + Math.round((parsedCount / totalToProcess) * 40);
+                const parseProgress = 45 + Math.round((parsedCount / Math.max(totalToProcess, 1)) * 40);
                 onProgress('parsing', parseProgress, `Parsed ${parsedCount} of ${totalToProcess} emails`);
-                return result;
+
+                const subject = parsed.subject || '';
+                const fromAddress = (parsed.from?.value?.[0]?.address || '').toLowerCase();
+                const isReply = /^\s*(re|aw|sv)\s*:/i.test(subject);
+
+                if (!isReply || !fromAddress || fromAddress === ownAddress) return null;
+
+                return {
+                    uid: message.attributes.uid,
+                    from: parsed.from?.text || fromAddress,
+                    fromAddress,
+                    subject,
+                    date: parsed.date,
+                    text: parsed.text,
+                };
             })
         );
 
-        // Filter out null results (non-RFP emails)
-        const emails = results.filter(email => email !== null);
-
-        emails.forEach(email => {
-            console.log(`Vendor reply from: ${email.from}`);
-        });
-
-        connection.end();
-
-        // Stage 4: Complete
+        const emails = results.filter(Boolean);
         onProgress('complete', 100, `Found ${emails.length} vendor replies`, { count: emails.length });
-        console.log(`Successfully fetched ${emails.length} RFP-related emails`);
-
         return emails;
     } catch (error) {
         console.error('Error fetching emails:', error.message);
-        onProgress('error', 0, error.message);
+        onProgress('error', 0, 'Could not read the inbox');
 
         if (error.message.includes('Invalid credentials') || error.message.includes('AUTHENTICATIONFAILED')) {
-            console.error('Check EMAIL_USER and EMAIL_PASS in .env - use App Password for Gmail');
+            console.error('Check EMAIL_USER and EMAIL_PASS in .env - use an App Password for Gmail');
         } else if (error.message.includes('IMAP')) {
             console.error('Enable IMAP in Gmail Settings -> Forwarding and POP/IMAP');
         }
 
         throw error;
+    } finally {
+        try {
+            connection?.end();
+        } catch {
+            // ignore
+        }
     }
 };

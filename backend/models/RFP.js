@@ -1,11 +1,14 @@
 import mongoose from 'mongoose';
 
 const rfpSchema = mongoose.Schema({
-    title: { type: String, required: true },
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    title: { type: String, required: true, trim: true },
     description: { type: String, required: true },
-    budget: { type: Number },
+    budget: { type: Number, min: 0 },
     currency: { type: String, default: 'USD' },
     deadline: { type: Date },
+    paymentTerms: { type: String },
+    warranty: { type: String },
     items: [{
         name: { type: String },
         quantity: { type: Number },
@@ -13,6 +16,9 @@ const rfpSchema = mongoose.Schema({
     }],
     status: { type: String, enum: ['Draft', 'Sent', 'Closed'], default: 'Draft' },
     vendors: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Vendor' }],
+    // Last AI comparison result, so it survives a page reload
+    analysis: { type: mongoose.Schema.Types.Mixed },
+    analyzedAt: { type: Date },
     createdAt: { type: Date, default: Date.now }
 });
 

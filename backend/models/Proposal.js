@@ -1,7 +1,8 @@
 import mongoose from 'mongoose';
 
 const proposalSchema = mongoose.Schema({
-    rfpId: { type: mongoose.Schema.Types.ObjectId, ref: 'RFP', required: true },
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    rfpId: { type: mongoose.Schema.Types.ObjectId, ref: 'RFP', required: true, index: true },
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', required: true },
     rawEmail: { type: String },
     parsedData: {

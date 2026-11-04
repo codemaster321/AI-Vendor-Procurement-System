@@ -31,7 +31,7 @@ npm install
 
 ```env
 PORT=5000
-MONGODB_URI=mongodb://localhost:27017/rfp_manager
+MONGO_URI=mongodb://localhost:27017/rfp_manager
 JWT_SECRET=your-secret-key-here
 OPENAI_API_KEY=your-openai-api-key
 

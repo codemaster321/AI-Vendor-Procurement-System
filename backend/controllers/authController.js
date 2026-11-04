@@ -1,5 +1,6 @@
 import User from '../models/User.js';
 import jwt from 'jsonwebtoken';
+import { serverError } from '../utils/http.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -12,7 +13,12 @@ const generateToken = (userId) => {
 
 export const register = async (req, res) => {
     try {
-        const { name, email, password, company } = req.body;
+        const { name, password, company } = req.body;
+        const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+
+        if (!name || !email || !password) {
+            return res.status(400).json({ message: 'Name, email and password are required' });
+        }
 
         const existingUser = await User.findOne({ email });
         if (existingUser) {
@@ -30,13 +36,18 @@ export const register = async (req, res) => {
             token
         });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        serverError(res, error);
     }
 };
 
 export const login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { password } = req.body;
+        const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Email and password are required' });
+        }
 
         const user = await User.findOne({ email });
         if (!user) {
@@ -58,7 +69,7 @@ export const login = async (req, res) => {
             token
         });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        serverError(res, error);
     }
 };
 
@@ -67,6 +78,6 @@ export const getMe = async (req, res) => {
         const user = await User.findById(req.user.id).select('-password');
         res.json(user);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        serverError(res, error);
     }
 };

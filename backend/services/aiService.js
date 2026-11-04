@@ -1,13 +1,31 @@
-import dotenv from 'dotenv';
+import OpenAI from 'openai';
 
-dotenv.config();
+// Created lazily so the server can boot (and auth/vendor routes work) even when
+// OPENAI_API_KEY is missing; AI routes then fail with a clear message instead.
+let client;
+const getClient = () => {
+    if (!process.env.OPENAI_API_KEY) {
+        throw new Error('OPENAI_API_KEY is not set in backend/.env');
+    }
+    client ??= new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    return client;
+};
 
-const OpenAI = (await import('openai')).default;
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Only the fields the model needs (no owner ids, previous analysis, etc.)
+const summarizeRFP = (rfp) => ({
+    title: rfp.title,
+    description: rfp.description,
+    budget: rfp.budget,
+    currency: rfp.currency,
+    deadline: rfp.deadline,
+    paymentTerms: rfp.paymentTerms,
+    warranty: rfp.warranty,
+    items: rfp.items?.map(({ name, quantity, specs }) => ({ name, quantity, specs })),
+});
 
 export const generateRFPFromNL = async (naturalLanguageText) => {
     try {
-        const response = await openai.chat.completions.create({
+        const response = await getClient().chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
@@ -27,7 +45,7 @@ Return ONLY valid JSON with this exact structure:
                 },
                 {
                     role: "user",
-                    content: naturalLanguageText
+                    content: `Today's date is ${new Date().toISOString().slice(0, 10)}. Resolve relative deadlines (e.g. "within 30 days") against it.\n\n${naturalLanguageText}`
                 }
             ],
             temperature: 0.3,
@@ -43,7 +61,7 @@ Return ONLY valid JSON with this exact structure:
 
 export const parseVendorResponse = async (emailBody, rfpDetails) => {
     try {
-        const response = await openai.chat.completions.create({
+        const response = await getClient().chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
@@ -62,7 +80,7 @@ Return ONLY valid JSON with this exact structure:
                 },
                 {
                     role: "user",
-                    content: `RFP Requirements:\n${JSON.stringify(rfpDetails, null, 2)}\n\nVendor Email:\n${emailBody}`
+                    content: `RFP Requirements:\n${JSON.stringify(summarizeRFP(rfpDetails), null, 2)}\n\nVendor Email:\n${String(emailBody).slice(0, 15000)}`
                 }
             ],
             temperature: 0.3,
@@ -78,7 +96,7 @@ Return ONLY valid JSON with this exact structure:
 
 export const compareProposals = async (rfpDetails, proposals) => {
     try {
-        const response = await openai.chat.completions.create({
+        const response = await getClient().chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
@@ -97,7 +115,16 @@ Return ONLY valid JSON with this structure:
                 },
                 {
                     role: "user",
-                    content: `RFP Details:\n${JSON.stringify(rfpDetails, null, 2)}\n\nProposals:\n${JSON.stringify(proposals, null, 2)}`
+                    content: `RFP Details:\n${JSON.stringify(summarizeRFP(rfpDetails), null, 2)}\n\nProposals:\n${JSON.stringify(
+                        proposals.map((p) => ({
+                            vendorId: String(p.vendorId._id),
+                            vendorName: p.vendorId.name,
+                            parsedData: p.parsedData,
+                            rawEmail: (p.rawEmail || '').slice(0, 4000),
+                        })),
+                        null,
+                        2
+                    )}\n\nUse the exact vendorId values above in vendorScores and recommendedVendorId.`
                 }
             ],
             temperature: 0.4,

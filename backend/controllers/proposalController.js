@@ -1,8 +1,21 @@
+import mongoose from 'mongoose';
 import Proposal from '../models/Proposal.js';
 import RFP from '../models/RFP.js';
 import Vendor from '../models/Vendor.js';
 import { parseVendorResponse, compareProposals } from '../services/aiService.js';
-import { fetchEmailsWithProgress } from '../services/emailService.js';
+import { fetchEmailsWithProgress, rfpReference } from '../services/emailService.js';
+import { serverError, pick } from '../utils/http.js';
+
+/**
+ * Decide whether an inbound email is a reply to this specific RFP.
+ * New RFP emails carry a `[Ref: <rfpId>]` tag in the subject, which survives "Re:".
+ * Emails sent before the tag existed fall back to matching the RFP title.
+ */
+const isReplyToRFP = (email, rfp) => {
+    const subject = (email.subject || '').toLowerCase();
+    if (subject.includes(rfpReference(rfp._id).toLowerCase())) return true;
+    return Boolean(rfp.title) && subject.includes(rfp.title.toLowerCase());
+};
 
 /**
  * SSE endpoint for fetching vendor emails with real-time progress
@@ -18,20 +31,30 @@ export const fetchVendorEmailsSSE = async (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
     res.flushHeaders();
 
+    // Stop doing work (and AI calls) once the client cancels / disconnects
+    let clientClosed = false;
+    req.on('close', () => {
+        clientClosed = true;
+    });
+
     // Helper to send SSE events
     const sendEvent = (event, data) => {
+        if (clientClosed) return;
         res.write(`event: ${event}\n`);
         res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
 
     try {
-        // Validate RFP exists
         sendEvent('progress', { stage: 'initializing', percentage: 0, message: 'Validating RFP...' });
 
-        const rfp = await RFP.findById(rfpId).populate('vendors');
+        const rfp = await RFP.findOne({ _id: rfpId, owner: req.user._id }).populate('vendors');
         if (!rfp) {
             sendEvent('error', { message: 'RFP not found' });
-            res.end();
+            return;
+        }
+
+        if (!rfp.vendors.length) {
+            sendEvent('error', { message: 'This RFP has not been sent to any vendors yet' });
             return;
         }
 
@@ -42,55 +65,57 @@ export const fetchVendorEmailsSSE = async (req, res) => {
             sendEvent('progress', { stage, percentage, message, ...data });
         });
 
-        // Process matched emails
+        if (clientClosed) return;
+
         sendEvent('progress', { stage: 'processing', percentage: 90, message: 'Matching emails with vendors...' });
 
+        const vendorsByEmail = new Map(rfp.vendors.map((v) => [v.email.toLowerCase(), v]));
         const processed = [];
         const newProposals = [];
 
         for (const email of emails) {
-            const vendor = rfp.vendors.find(v => email.from.includes(v.email));
+            if (clientClosed) return;
+            if (!isReplyToRFP(email, rfp)) continue;
 
-            if (vendor) {
-                const existingProposal = await Proposal.findOne({ rfpId, vendorId: vendor._id });
+            const vendor = vendorsByEmail.get(email.fromAddress);
+            if (!vendor) continue;
 
-                if (!existingProposal) {
-                    sendEvent('progress', {
-                        stage: 'processing',
-                        percentage: 92,
-                        message: `Parsing proposal from ${vendor.name}...`
-                    });
-
-                    const parsedData = await parseVendorResponse(email.text, rfp);
-
-                    const proposal = new Proposal({
-                        rfpId,
-                        vendorId: vendor._id,
-                        rawEmail: email.text,
-                        parsedData
-                    });
-
-                    await proposal.save();
-                    processed.push({ vendor: vendor.name, status: 'created' });
-                    newProposals.push(proposal);
-                } else {
-                    processed.push({ vendor: vendor.name, status: 'already exists' });
-                }
+            const existingProposal = await Proposal.findOne({ rfpId: rfp._id, vendorId: vendor._id });
+            if (existingProposal) {
+                processed.push({ vendor: vendor.name, status: 'already exists' });
+                continue;
             }
+
+            sendEvent('progress', {
+                stage: 'processing',
+                percentage: 92,
+                message: `Parsing proposal from ${vendor.name}...`,
+            });
+
+            const parsedData = await parseVendorResponse(email.text || '', rfp);
+
+            const proposal = await Proposal.create({
+                owner: req.user._id,
+                rfpId: rfp._id,
+                vendorId: vendor._id,
+                rawEmail: email.text,
+                parsedData,
+            });
+
+            processed.push({ vendor: vendor.name, status: 'created' });
+            newProposals.push(proposal);
         }
 
-        // Send completion event
         sendEvent('complete', {
             message: 'Email processing complete',
             results: processed,
             proposals: newProposals,
             totalFound: emails.length,
-            newProposals: newProposals.length
+            newProposals: newProposals.length,
         });
-
     } catch (error) {
         console.error('SSE Error:', error);
-        sendEvent('error', { message: error.message || 'Failed to fetch emails' });
+        sendEvent('error', { message: 'Failed to fetch emails. Check the email configuration.' });
     } finally {
         res.end();
     }
@@ -101,12 +126,19 @@ export const createProposal = async (req, res) => {
     try {
         const { rfpId, vendorId, rawEmail } = req.body;
 
-        const rfp = await RFP.findById(rfpId);
+        if (!mongoose.isValidObjectId(rfpId) || !mongoose.isValidObjectId(vendorId)) {
+            return res.status(400).json({ message: 'Invalid RFP or vendor id' });
+        }
+        if (!rawEmail || typeof rawEmail !== 'string') {
+            return res.status(400).json({ message: 'Proposal text is required' });
+        }
+
+        const rfp = await RFP.findOne({ _id: rfpId, owner: req.user._id });
         if (!rfp) {
             return res.status(404).json({ message: 'RFP not found' });
         }
 
-        const vendor = await Vendor.findById(vendorId);
+        const vendor = await Vendor.findOne({ _id: vendorId, owner: req.user._id });
         if (!vendor) {
             return res.status(404).json({ message: 'Vendor not found' });
         }
@@ -114,30 +146,31 @@ export const createProposal = async (req, res) => {
         // Use AI to parse the email
         const parsedData = await parseVendorResponse(rawEmail, rfp);
 
-        const proposal = new Proposal({
+        const proposal = await Proposal.create({
+            owner: req.user._id,
             rfpId,
             vendorId,
             rawEmail,
-            parsedData
+            parsedData,
         });
 
-        const savedProposal = await proposal.save();
-        res.status(201).json(savedProposal);
+        await RFP.updateOne({ _id: rfp._id }, { $addToSet: { vendors: vendor._id } });
+
+        res.status(201).json(proposal);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        serverError(res, error, 'Failed to create proposal');
     }
 };
-
 
 // Get proposals for an RFP
 export const getProposalsByRFP = async (req, res) => {
     try {
-        const proposals = await Proposal.find({ rfpId: req.params.rfpId })
+        const proposals = await Proposal.find({ rfpId: req.params.rfpId, owner: req.user._id })
             .populate('vendorId')
             .sort({ createdAt: -1 });
         res.json(proposals);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        serverError(res, error);
     }
 };
 
@@ -146,48 +179,96 @@ export const compareRFPProposals = async (req, res) => {
     try {
         const { rfpId } = req.params;
 
-        const rfp = await RFP.findById(rfpId);
+        const rfp = await RFP.findOne({ _id: rfpId, owner: req.user._id });
         if (!rfp) {
             return res.status(404).json({ message: 'RFP not found' });
         }
 
-        const proposals = await Proposal.find({ rfpId }).populate('vendorId');
+        const proposals = await Proposal.find({ rfpId, owner: req.user._id }).populate('vendorId');
+        const usable = proposals.filter((p) => p.vendorId);
 
-        if (proposals.length === 0) {
+        if (usable.length === 0) {
             return res.status(404).json({ message: 'No proposals found for this RFP' });
         }
 
-        // Use AI to compare proposals
-        const comparison = await compareProposals(rfp, proposals);
+        const comparison = await compareProposals(rfp, usable);
 
-        res.json(comparison);
+        // The model's output is untrusted: keep only scores for vendors that actually bid
+        const knownIds = new Set(usable.map((p) => String(p.vendorId._id)));
+        const vendorScores = (Array.isArray(comparison.vendorScores) ? comparison.vendorScores : [])
+            .filter((s) => s && knownIds.has(String(s.vendorId)))
+            .map((s) => ({
+                vendorId: String(s.vendorId),
+                score: Math.max(0, Math.min(100, Math.round(Number(s.score) || 0))),
+                strengths: Array.isArray(s.strengths) ? s.strengths.map(String) : [],
+                weaknesses: Array.isArray(s.weaknesses) ? s.weaknesses.map(String) : [],
+            }));
+
+        const rec = comparison.recommendation;
+        const recommendation =
+            rec && knownIds.has(String(rec.recommendedVendorId))
+                ? {
+                      recommendedVendorId: String(rec.recommendedVendorId),
+                      reasoning: String(rec.reasoning || ''),
+                      considerations: Array.isArray(rec.considerations) ? rec.considerations.map(String) : [],
+                  }
+                : null;
+
+        const result = {
+            summary: String(comparison.summary || ''),
+            vendorScores,
+            recommendation,
+        };
+
+        // Persist so the analysis survives a reload
+        await Promise.all([
+            RFP.updateOne({ _id: rfp._id }, { $set: { analysis: result, analyzedAt: new Date() } }),
+            ...vendorScores.map((s) =>
+                Proposal.updateOne(
+                    { rfpId: rfp._id, vendorId: s.vendorId, owner: req.user._id },
+                    {
+                        $set: {
+                            score: s.score,
+                            aiAnalysis: JSON.stringify({ strengths: s.strengths, weaknesses: s.weaknesses }),
+                            status: 'Reviewed',
+                        },
+                    }
+                )
+            ),
+        ]);
+
+        res.json(result);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        serverError(res, error, 'Failed to compare proposals');
     }
 };
 
 // Update proposal
 export const updateProposal = async (req, res) => {
     try {
-        const proposal = await Proposal.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        const updates = pick(req.body, ['status', 'parsedData', 'score']);
+        const proposal = await Proposal.findOneAndUpdate({ _id: req.params.id, owner: req.user._id }, updates, {
+            returnDocument: 'after',
+            runValidators: true,
+        });
         if (!proposal) {
             return res.status(404).json({ message: 'Proposal not found' });
         }
         res.json(proposal);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        serverError(res, error);
     }
 };
 
 // Delete proposal
 export const deleteProposal = async (req, res) => {
     try {
-        const proposal = await Proposal.findByIdAndDelete(req.params.id);
+        const proposal = await Proposal.findOneAndDelete({ _id: req.params.id, owner: req.user._id });
         if (!proposal) {
             return res.status(404).json({ message: 'Proposal not found' });
         }
         res.json({ message: 'Proposal deleted successfully' });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        serverError(res, error);
     }
 };

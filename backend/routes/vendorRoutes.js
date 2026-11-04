@@ -6,8 +6,11 @@ import {
     updateVendor,
     deleteVendor
 } from '../controllers/vendorController.js';
+import { validateObjectId } from '../utils/http.js';
 
 const router = express.Router();
+
+router.param('id', validateObjectId);
 
 router.post('/', createVendor);
 router.get('/', getAllVendors);
