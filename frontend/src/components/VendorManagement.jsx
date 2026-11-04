@@ -1,6 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Mail, Phone, User, Building, Loader2, X, Save } from 'lucide-react';
+import { Plus, Pencil, Trash2, Search, X } from 'lucide-react';
 import { getAllVendors, createVendor, updateVendor, deleteVendor } from '../services/api';
+import { getInitials } from '../lib/format';
+
+const FIELDS = [
+    { key: 'name', label: 'Company name', type: 'text', placeholder: 'Acme Supplies Ltd.', required: true },
+    { key: 'email', label: 'Email', type: 'email', placeholder: 'sales@acme.com', required: true, hint: 'RFPs are sent to this address.' },
+    { key: 'contactPerson', label: 'Contact person', type: 'text', placeholder: 'Jane Doe' },
+    { key: 'phone', label: 'Phone', type: 'tel', placeholder: '+1 234 567 8900' },
+    { key: 'category', label: 'Category', type: 'text', placeholder: 'IT Equipment' },
+];
 
 const VendorManagement = () => {
     const [vendors, setVendors] = useState([]);
@@ -12,9 +21,10 @@ const VendorManagement = () => {
         email: '',
         contactPerson: '',
         phone: '',
-        category: ''
+        category: '',
     });
     const [saving, setSaving] = useState(false);
+    const [query, setQuery] = useState('');
 
     useEffect(() => {
         fetchVendors();
@@ -58,7 +68,7 @@ const VendorManagement = () => {
             email: vendor.email,
             contactPerson: vendor.contactPerson || '',
             phone: vendor.phone || '',
-            category: vendor.category || ''
+            category: vendor.category || '',
         });
         setShowForm(true);
     };
@@ -80,222 +90,182 @@ const VendorManagement = () => {
             email: '',
             contactPerson: '',
             phone: '',
-            category: ''
+            category: '',
         });
         setEditingVendor(null);
         setShowForm(false);
     };
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center py-20">
-                <Loader2 className="animate-spin text-purple-400" size={48} />
-            </div>
-        );
-    }
+    const list = Array.isArray(vendors) ? vendors : [];
+    const q = query.trim().toLowerCase();
+    const visible = q
+        ? list.filter((v) =>
+              [v.name, v.email, v.category, v.contactPerson].some((f) => f?.toLowerCase().includes(q))
+          )
+        : list;
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-8 animate-fade-in">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <h1 className="text-3xl font-bold text-white">Vendor Management</h1>
-                <button
-                    onClick={() => setShowForm(!showForm)}
-                    className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all transform hover:scale-105"
-                >
-                    <Plus size={20} />
-                    <span>Add Vendor</span>
+            <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                    <h1 className="page-title">Vendors</h1>
+                    <p className="page-subtitle">The suppliers you send RFPs to and receive proposals from.</p>
+                </div>
+                <button onClick={() => setShowForm(true)} className="btn btn-primary">
+                    <Plus size={15} />
+                    Add vendor
                 </button>
-            </div>
+            </header>
 
-            {/* Create/Edit Form */}
-            {showForm && (
-                <div className="bg-gradient-to-br from-purple-900/40 to-blue-900/40 backdrop-blur-sm rounded-2xl p-6 border border-purple-500/30 shadow-2xl">
-                    <div className="flex items-center justify-between mb-6">
-                        <h2 className="text-2xl font-bold text-white">
-                            {editingVendor ? 'Edit Vendor' : 'Add New Vendor'}
-                        </h2>
-                        <button
-                            onClick={resetForm}
-                            className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
-                        >
-                            <X size={20} />
-                        </button>
+            <section>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="relative w-full max-w-xs">
+                        <Search className="input-icon" size={14} />
+                        <input
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                            placeholder="Search vendors…"
+                            className="input input-with-icon h-9"
+                        />
                     </div>
+                    <span className="num shrink-0 text-xs text-subtle">
+                        {visible.length} of {list.length}
+                    </span>
+                </div>
 
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div className="grid md:grid-cols-2 gap-4">
+                <div className="card overflow-hidden">
+                    {loading ? (
+                        <div className="flex justify-center py-20">
+                            <div className="spinner spinner-lg" />
+                        </div>
+                    ) : visible.length === 0 ? (
+                        <div className="empty-state dot-grid">
+                            <p className="display text-2xl">{list.length === 0 ? 'No vendors yet.' : 'No matches.'}</p>
+                            <p className="mt-2 max-w-xs text-sm text-muted">
+                                {list.length === 0
+                                    ? 'Add the suppliers you want to request proposals from.'
+                                    : `Nothing matches “${query}”.`}
+                            </p>
+                            {list.length === 0 && (
+                                <button onClick={() => setShowForm(true)} className="btn btn-primary mt-6">
+                                    <Plus size={15} />
+                                    Add your first vendor
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Vendor</th>
+                                        <th>Category</th>
+                                        <th className="hidden md:table-cell">Contact</th>
+                                        <th className="hidden lg:table-cell">Phone</th>
+                                        <th className="text-right">
+                                            <span className="sr-only">Actions</span>
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {visible.map((vendor) => (
+                                        <tr key={vendor._id} className="row-hover group" onClick={() => handleEdit(vendor)}>
+                                            <td>
+                                                <div className="flex items-center gap-3">
+                                                    <span className="avatar h-8 w-8">{getInitials(vendor.name)}</span>
+                                                    <div className="min-w-0">
+                                                        <p className="truncate font-medium text-ink">{vendor.name}</p>
+                                                        <p className="truncate text-xs text-subtle">{vendor.email}</p>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                {vendor.category ? (
+                                                    <span className="badge badge-neutral">{vendor.category}</span>
+                                                ) : (
+                                                    <span className="text-subtle">—</span>
+                                                )}
+                                            </td>
+                                            <td className="hidden text-muted md:table-cell">{vendor.contactPerson || '—'}</td>
+                                            <td className="num hidden text-muted lg:table-cell">{vendor.phone || '—'}</td>
+                                            <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                                                <div className="flex justify-end gap-0.5 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100">
+                                                    <button
+                                                        onClick={() => handleEdit(vendor)}
+                                                        className="btn btn-ghost btn-icon"
+                                                        title="Edit"
+                                                        aria-label="Edit vendor"
+                                                    >
+                                                        <Pencil size={13} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDelete(vendor._id)}
+                                                        className="btn btn-ghost btn-icon hover:bg-danger-soft hover:text-danger"
+                                                        title="Delete"
+                                                        aria-label="Delete vendor"
+                                                    >
+                                                        <Trash2 size={13} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            </section>
+
+            {/* Slide-over form */}
+            {showForm && (
+                <>
+                    <div className="drawer-backdrop" onClick={resetForm} />
+                    <form onSubmit={handleSubmit} className="drawer">
+                        <div className="flex items-start justify-between border-b border-line px-6 py-5">
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    Vendor Name *
-                                </label>
-                                <div className="relative">
-                                    <Building className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={18} />
-                                    <input
-                                        type="text"
-                                        value={formData.name}
-                                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                        className="w-full pl-10 pr-4 py-3 bg-black/30 border border-purple-500/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                        placeholder="ABC Corporation"
-                                        required
-                                    />
-                                </div>
+                                <p className="eyebrow">{editingVendor ? 'Edit vendor' : 'New vendor'}</p>
+                                <h2 className="display mt-1 text-2xl">{editingVendor ? editingVendor.name : 'Add a vendor'}</h2>
                             </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    Email *
-                                </label>
-                                <div className="relative">
-                                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={18} />
-                                    <input
-                                        type="email"
-                                        value={formData.email}
-                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                        className="w-full pl-10 pr-4 py-3 bg-black/30 border border-purple-500/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                        placeholder="vendor@example.com"
-                                        required
-                                    />
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    Contact Person
-                                </label>
-                                <div className="relative">
-                                    <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={18} />
-                                    <input
-                                        type="text"
-                                        value={formData.contactPerson}
-                                        onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
-                                        className="w-full pl-10 pr-4 py-3 bg-black/30 border border-purple-500/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                        placeholder="John Doe"
-                                    />
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    Phone
-                                </label>
-                                <div className="relative">
-                                    <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={18} />
-                                    <input
-                                        type="tel"
-                                        value={formData.phone}
-                                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                                        className="w-full pl-10 pr-4 py-3 bg-black/30 border border-purple-500/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                        placeholder="+1 234 567 8900"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="md:col-span-2">
-                                <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    Category
-                                </label>
-                                <input
-                                    type="text"
-                                    value={formData.category}
-                                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                                    className="w-full px-4 py-3 bg-black/30 border border-purple-500/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                    placeholder="e.g., IT Equipment, Office Supplies"
-                                />
-                            </div>
+                            <button type="button" onClick={resetForm} className="btn btn-ghost btn-icon -mr-2" aria-label="Close">
+                                <X size={16} />
+                            </button>
                         </div>
 
-                        <div className="flex items-center space-x-3 pt-4">
-                            <button
-                                type="submit"
-                                disabled={saving}
-                                className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                            >
-                                {saving ? (
-                                    <>
-                                        <Loader2 className="animate-spin" size={20} />
-                                        <span>Saving...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Save size={20} />
-                                        <span>{editingVendor ? 'Update' : 'Create'} Vendor</span>
-                                    </>
-                                )}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={resetForm}
-                                className="px-6 py-3 bg-gray-600/50 text-white rounded-lg hover:bg-gray-600/70 transition-all"
-                            >
+                        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-6">
+                            {FIELDS.map((f) => (
+                                <div key={f.key}>
+                                    <label htmlFor={`vendor-${f.key}`} className="label">
+                                        {f.label}
+                                        {!f.required && <span className="ml-1 font-normal text-subtle">· optional</span>}
+                                    </label>
+                                    <input
+                                        id={`vendor-${f.key}`}
+                                        type={f.type}
+                                        value={formData[f.key]}
+                                        onChange={(e) => setFormData({ ...formData, [f.key]: e.target.value })}
+                                        placeholder={f.placeholder}
+                                        required={f.required}
+                                        className="input"
+                                        autoFocus={f.key === 'name'}
+                                    />
+                                    {f.hint && <p className="mt-1.5 text-xs text-subtle">{f.hint}</p>}
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="flex justify-end gap-2 border-t border-line bg-surface-2 px-6 py-4">
+                            <button type="button" onClick={resetForm} className="btn btn-secondary">
                                 Cancel
+                            </button>
+                            <button type="submit" disabled={saving} className="btn btn-primary">
+                                {saving && <div className="spinner spinner-light h-3.5 w-3.5" />}
+                                {saving ? 'Saving…' : editingVendor ? 'Save changes' : 'Add vendor'}
                             </button>
                         </div>
                     </form>
-                </div>
-            )}
-
-            {/* Vendor List */}
-            {vendors.length === 0 ? (
-                <div className="text-center py-20">
-                    <div className="text-gray-400 text-lg">No vendors yet. Add your first vendor!</div>
-                </div>
-            ) : (
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {vendors.map((vendor) => (
-                        <div
-                            key={vendor._id}
-                            className="bg-gradient-to-br from-slate-800/60 to-purple-900/30 backdrop-blur-sm rounded-xl p-6 border border-purple-500/20 hover:border-purple-500/40 transition-all shadow-xl group"
-                        >
-                            <div className="flex items-start justify-between mb-4">
-                                <div className="flex-1">
-                                    <h3 className="text-xl font-bold text-white mb-1">{vendor.name}</h3>
-                                    {vendor.category && (
-                                        <span className="inline-block px-3 py-1 text-xs font-semibold bg-purple-500/20 text-purple-300 rounded-full">
-                                            {vendor.category}
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="space-y-3 mb-4">
-                                <div className="flex items-center space-x-2 text-sm text-gray-300">
-                                    <Mail size={16} className="text-purple-400" />
-                                    <span className="truncate">{vendor.email}</span>
-                                </div>
-                                {vendor.contactPerson && (
-                                    <div className="flex items-center space-x-2 text-sm text-gray-300">
-                                        <User size={16} className="text-blue-400" />
-                                        <span>{vendor.contactPerson}</span>
-                                    </div>
-                                )}
-                                {vendor.phone && (
-                                    <div className="flex items-center space-x-2 text-sm text-gray-300">
-                                        <Phone size={16} className="text-green-400" />
-                                        <span>{vendor.phone}</span>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="flex items-center space-x-2 pt-4 border-t border-purple-500/20">
-                                <button
-                                    onClick={() => handleEdit(vendor)}
-                                    className="flex-1 flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600/30 text-blue-300 rounded-lg hover:bg-blue-600/50 transition-all"
-                                >
-                                    <Edit2 size={16} />
-                                    <span>Edit</span>
-                                </button>
-                                <button
-                                    onClick={() => handleDelete(vendor._id)}
-                                    className="flex-1 flex items-center justify-center space-x-2 px-4 py-2 bg-red-600/30 text-red-300 rounded-lg hover:bg-red-600/50 transition-all"
-                                >
-                                    <Trash2 size={16} />
-                                    <span>Delete</span>
-                                </button>
-                            </div>
-                        </div>
-                    ))}
-                </div>
+                </>
             )}
         </div>
     );

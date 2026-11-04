@@ -1,365 +1,217 @@
-import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import {
-  FileText,
-  Users,
-  TrendingUp,
-  Clock,
-  ArrowRight,
-  Plus,
-  Zap,
-  Target,
-  Brain,
-} from "lucide-react";
-import { getAllRFPs, getAllVendors } from "../services/api";
+import { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ArrowUpRight, ArrowRight, Sparkles } from 'lucide-react';
+import { getAllRFPs, getAllVendors } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { formatDate, formatMoney, statusBadge } from '../lib/format';
+
+const greeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 18) return 'Good afternoon';
+    return 'Good evening';
+};
 
 const DashboardHome = () => {
-  const [stats, setStats] = useState({
-    totalRFPs: 0,
-    sentRFPs: 0,
-    draftRFPs: 0,
-    totalVendors: 0,
-    recentActivity: [],
-  });
-  const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
+    const { user } = useAuth();
+    const [stats, setStats] = useState({
+        totalRFPs: 0,
+        sentRFPs: 0,
+        draftRFPs: 0,
+        totalVendors: 0,
+        recentActivity: [],
+    });
+    const [loading, setLoading] = useState(true);
+    const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    useEffect(() => {
+        fetchDashboardData();
+    }, []);
 
-  const fetchDashboardData = async () => {
-    try {
-      const [rfpsResponse, vendorsResponse] = await Promise.all([
-        getAllRFPs(),
-        getAllVendors(),
-      ]);
+    const fetchDashboardData = async () => {
+        try {
+            const [rfpsResponse, vendorsResponse] = await Promise.all([getAllRFPs(), getAllVendors()]);
 
-      const rfpsData = rfpsResponse.data?.data || rfpsResponse.data;
-      const vendorsData = vendorsResponse.data?.data || vendorsResponse.data;
+            const rfpsData = rfpsResponse.data?.data || rfpsResponse.data;
+            const vendorsData = vendorsResponse.data?.data || vendorsResponse.data;
 
-      const rfps = Array.isArray(rfpsData) ? rfpsData : [];
-      const vendors = Array.isArray(vendorsData) ? vendorsData : [];
+            const rfps = Array.isArray(rfpsData) ? rfpsData : [];
+            const vendors = Array.isArray(vendorsData) ? vendorsData : [];
 
-      const sentRFPs = rfps.filter((r) => r.status === "Sent").length;
-      const draftRFPs = rfps.filter((r) => r.status === "Draft").length;
+            const sentRFPs = rfps.filter((r) => r.status === 'Sent').length;
+            const draftRFPs = rfps.filter((r) => r.status === 'Draft').length;
 
-      const recentActivity = rfps.slice(0, 5).map((rfp) => ({
-        id: rfp._id,
-        title: rfp.title,
-        status: rfp.status,
-        date: new Date(rfp.createdAt),
-        vendorCount: rfp.vendors?.length || 0,
-      }));
+            const recentActivity = rfps.slice(0, 6).map((rfp) => ({
+                id: rfp._id,
+                title: rfp.title,
+                status: rfp.status,
+                date: rfp.createdAt,
+                budget: rfp.budget,
+                currency: rfp.currency,
+                vendorCount: rfp.vendors?.length || 0,
+            }));
 
-      setStats({
-        totalRFPs: rfps.length,
-        sentRFPs,
-        draftRFPs,
-        totalVendors: vendors.length,
-        recentActivity,
-      });
-    } catch (error) {
-      console.error("Error fetching dashboard data:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+            setStats({
+                totalRFPs: rfps.length,
+                sentRFPs,
+                draftRFPs,
+                totalVendors: vendors.length,
+                recentActivity,
+            });
+        } catch (error) {
+            console.error('Error fetching dashboard data:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
-  if (loading) {
+    const firstName = user?.name?.split(' ')[0];
+    const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+    const otherRFPs = Math.max(stats.totalRFPs - stats.sentRFPs - stats.draftRFPs, 0);
+    const pct = (n) => (stats.totalRFPs ? (n / stats.totalRFPs) * 100 : 0);
+
+    const metrics = [
+        { label: 'Total RFPs', value: stats.totalRFPs },
+        { label: 'Sent', value: stats.sentRFPs },
+        { label: 'Drafts', value: stats.draftRFPs },
+        { label: 'Vendors', value: stats.totalVendors },
+    ];
+
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="w-16 h-16 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin"></div>
-      </div>
-    );
-  }
+        <div className="space-y-10 animate-fade-in">
+            {/* Greeting */}
+            <header>
+                <p className="eyebrow">{today}</p>
+                <h1 className="page-title mt-2 text-4xl sm:text-5xl">
+                    {greeting()}
+                    {firstName ? `, ${firstName}` : ''}.
+                </h1>
+            </header>
 
-  return (
-    <div className="space-y-10 animate-fade-in">
-      <div className="text-center space-y-4 py-6">
-        <h1 className="text-4xl md:text-5xl font-bold gradient-text mb-3">
-          Welcome Back
-        </h1>
-        <p
-          className="text-lg text-gray-300 max-w-2xl mx-auto"
-          style={{ color: "#94a3b8" }}
-        >
-          Streamline your procurement with AI-powered RFP management
-        </p>
-        <button
-          onClick={() => navigate("/dashboard/rfps")}
-          className="btn-primary inline-flex items-center space-x-2 mt-6"
-        >
-          <Plus size={20} />
-          <span>Create New RFP</span>
-        </button>
-      </div>
-
-      {/* Stats Grid - Solid Colors, No Gradients */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {/* Total RFPs */}
-        <div className="glass-card-hover animate-slide-up">
-          <div className="flex items-start justify-between mb-4">
-            <div className="p-3 rounded-2xl" style={{ background: "#06b6d4" }}>
-              <FileText className="text-white" size={24} />
-            </div>
-          </div>
-          <h3
-            className="text-5xl font-bold mb-2"
-            style={{
-              background: "linear-gradient(135deg, #22d3ee, #06b6d4)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-            }}
-          >
-            {stats.totalRFPs}
-          </h3>
-          <p className="text-sm font-medium" style={{ color: "#94a3b8" }}>
-            Total RFPs
-          </p>
-        </div>
-
-        {/* Sent RFPs */}
-        <div className="glass-card-hover animate-slide-up animation-delay-200">
-          <div className="flex items-start justify-between mb-4">
-            <div className="p-3 rounded-2xl" style={{ background: "#10b981" }}>
-              <Zap className="text-white" size={24} />
-            </div>
-          </div>
-          <h3
-            className="text-5xl font-bold mb-2"
-            style={{
-              background: "linear-gradient(135deg, #22d3ee, #06b6d4)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-            }}
-          >
-            {stats.sentRFPs}
-          </h3>
-          <p className="text-sm font-medium" style={{ color: "#94a3b8" }}>
-            Sent to Vendors
-          </p>
-        </div>
-
-        {/* Draft RFPs */}
-        <div className="glass-card-hover animate-slide-up animation-delay-400">
-          <div className="flex items-start justify-between mb-4">
-            <div className="p-3 rounded-2xl" style={{ background: "#f59e0b" }}>
-              <Clock className="text-white" size={24} />
-            </div>
-          </div>
-          <h3
-            className="text-5xl font-bold mb-2"
-            style={{
-              background: "linear-gradient(135deg, #22d3ee, #06b6d4)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-            }}
-          >
-            {stats.draftRFPs}
-          </h3>
-          <p className="text-sm font-medium" style={{ color: "#94a3b8" }}>
-            Draft RFPs
-          </p>
-        </div>
-
-        {/* Total Vendors */}
-        <div className="glass-card-hover animate-slide-up animation-delay-600">
-          <div className="flex items-start justify-between mb-4">
-            <div className="p-3 rounded-2xl" style={{ background: "#f97316" }}>
-              <Users className="text-white" size={24} />
-            </div>
-          </div>
-          <h3
-            className="text-5xl font-bold mb-2"
-            style={{
-              background: "linear-gradient(135deg, #22d3ee, #06b6d4)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-            }}
-          >
-            {stats.totalVendors}
-          </h3>
-          <p className="text-sm font-medium" style={{ color: "#94a3b8" }}>
-            Active Vendors
-          </p>
-        </div>
-      </div>
-
-      {/* Quick Actions & Recent Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Quick Actions - Reduced Gradients */}
-        <div className="glass-card animate-slide-up">
-          <div className="flex items-center space-x-3 mb-6">
-            <div className="p-2 rounded-xl" style={{ background: "#06b6d4" }}>
-              <Target size={20} className="text-white" />
-            </div>
-            <h2 className="text-xl font-bold" style={{ color: "#e2e8f0" }}>
-              Quick Actions
-            </h2>
-          </div>
-          <div className="space-y-3">
-            <Link
-              to="/dashboard/rfps"
-              className="flex items-center justify-between p-4 glass-card-hover group"
+            {/* Composer shortcut */}
+            <button
+                onClick={() => navigate('/dashboard/rfps?new=1')}
+                className="card group flex w-full items-center gap-4 p-4 text-left transition-shadow hover:shadow-[0_8px_30px_-12px_rgba(19,41,75,0.25)] sm:p-5"
             >
-              <div className="flex items-center space-x-3">
-                <div
-                  className="p-2 rounded-xl"
-                  style={{ background: "#06b6d4" }}
-                >
-                  <FileText size={18} className="text-white" />
-                </div>
-                <span className="font-medium" style={{ color: "#e2e8f0" }}>
-                  Create New RFP
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+                    <Sparkles size={18} />
                 </span>
-              </div>
-              <ArrowRight
-                size={18}
-                className="text-gray-400 group-hover:text-white group-hover:translate-x-1 transition-all"
-              />
-            </Link>
-
-            <Link
-              to="/dashboard/vendors"
-              className="flex items-center justify-between p-4 glass-card-hover group"
-            >
-              <div className="flex items-center space-x-3">
-                <div
-                  className="p-2 rounded-xl"
-                  style={{ background: "#f97316" }}
-                >
-                  <Users size={18} className="text-white" />
-                </div>
-                <span className="font-medium" style={{ color: "#e2e8f0" }}>
-                  Manage Vendors
+                <span className="min-w-0 flex-1">
+                    <span className="block text-[15px] font-medium text-ink">What do you need to buy?</span>
+                    <span className="block truncate text-sm text-subtle">
+                        “20 laptops with 16GB RAM, delivered in 30 days, budget $50k…”
+                    </span>
                 </span>
-              </div>
-              <ArrowRight
-                size={18}
-                className="text-gray-400 group-hover:text-white group-hover:translate-x-1 transition-all"
-              />
-            </Link>
-
-            <Link
-              to="/dashboard/rfps"
-              className="flex items-center justify-between p-4 glass-card-hover group"
-            >
-              <div className="flex items-center space-x-3">
-                <div
-                  className="p-2 rounded-xl"
-                  style={{ background: "#10b981" }}
-                >
-                  <Zap size={18} className="text-white" />
-                </div>
-                <span className="font-medium" style={{ color: "#e2e8f0" }}>
-                  View All RFPs
+                <span className="hidden items-center gap-1.5 text-sm font-medium text-ink sm:flex">
+                    Draft with AI
+                    <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
                 </span>
-              </div>
-              <ArrowRight
-                size={18}
-                className="text-gray-400 group-hover:text-white group-hover:translate-x-1 transition-all"
-              />
-            </Link>
-          </div>
-        </div>
+            </button>
 
-        {/* Recent Activity */}
-        <div className="lg:col-span-2 glass-card animate-slide-up">
-          <div className="flex items-center space-x-3 mb-6">
-            <div className="p-2 rounded-xl" style={{ background: "#f97316" }}>
-              <Clock size={20} className="text-white" />
-            </div>
-            <h2 className="text-xl font-bold" style={{ color: "#e2e8f0" }}>
-              Recent Activity
-            </h2>
-          </div>
+            {/* Metrics */}
+            <section className="card overflow-hidden">
+                <div className="grid grid-cols-2 gap-px bg-line lg:grid-cols-4">
+                    {metrics.map((m) => (
+                        <div key={m.label} className="bg-surface p-5">
+                            <p className="eyebrow">{m.label}</p>
+                            <p className="num mt-3 text-4xl font-medium text-ink">
+                                {loading ? <span className="inline-block h-9 w-10 animate-pulse rounded bg-surface-3" /> : m.value}
+                            </p>
+                        </div>
+                    ))}
+                </div>
+                <div className="border-t border-line bg-surface-2 px-5 py-4">
+                    <div className="flex h-2 overflow-hidden rounded-full bg-surface-3">
+                        <div className="bg-success transition-all" style={{ width: `${pct(stats.sentRFPs)}%` }} />
+                        <div className="bg-warning transition-all" style={{ width: `${pct(stats.draftRFPs)}%` }} />
+                        <div className="bg-subtle transition-all" style={{ width: `${pct(otherRFPs)}%` }} />
+                    </div>
+                    <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">
+                        <span className="flex items-center gap-1.5">
+                            <span className="h-2 w-2 rounded-full bg-success" /> Sent to vendors
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                            <span className="h-2 w-2 rounded-full bg-warning" /> Draft
+                        </span>
+                        {otherRFPs > 0 && (
+                            <span className="flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full bg-subtle" /> Closed
+                            </span>
+                        )}
+                    </div>
+                </div>
+            </section>
 
-          {stats.recentActivity.length === 0 ? (
-            <div className="text-center py-16">
-              <div
-                className="inline-flex p-6 rounded-3xl mb-4"
-                style={{ background: "rgba(6, 182, 212, 0.1)" }}
-              >
-                <FileText style={{ color: "#64748b" }} size={48} />
-              </div>
-              <p className="text-lg mb-2" style={{ color: "#94a3b8" }}>
-                No RFPs yet
-              </p>
-              <p className="text-sm mb-6" style={{ color: "#64748b" }}>
-                Create your first RFP to get started
-              </p>
-              <button
-                onClick={() => navigate("/dashboard/rfps")}
-                className="btn-primary inline-flex items-center space-x-2"
-              >
-                <Plus size={18} />
-                <span>Create Your First RFP</span>
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {stats.recentActivity.map((activity, index) => (
-                <div
-                  key={activity.id}
-                  onClick={() =>
-                    navigate(`/dashboard/rfp/${activity.id}/compare`)
-                  }
-                  className="flex items-center justify-between p-4 glass-card-hover cursor-pointer group"
-                  style={{ animationDelay: `${index * 100}ms` }}
-                >
-                  <div className="flex items-center space-x-4 flex-1 min-w-0">
-                    <div
-                      className="p-2.5 rounded-xl"
-                      style={{
-                        background:
-                          activity.status === "Sent"
-                            ? "#10b981"
-                            : activity.status === "Draft"
-                            ? "#f59e0b"
-                            : "#64748b",
-                      }}
+            {/* Recent RFPs */}
+            <section>
+                <div className="mb-3 flex items-baseline justify-between">
+                    <h2 className="display text-2xl">Recent RFPs</h2>
+                    <Link
+                        to="/dashboard/rfps"
+                        className="flex items-center gap-1 text-sm font-medium text-muted transition-colors hover:text-ink"
                     >
-                      <FileText size={18} className="text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3
-                        className="font-medium truncate group-hover:text-cyan-400 transition-colors"
-                        style={{ color: "#e2e8f0" }}
-                      >
-                        {activity.title}
-                      </h3>
-                      <div className="flex items-center space-x-3 mt-1">
-                        <span
-                          className={`badge ${
-                            activity.status === "Sent"
-                              ? "badge-success"
-                              : activity.status === "Draft"
-                              ? "badge-warning"
-                              : "badge-primary"
-                          }`}
-                        >
-                          {activity.status}
-                        </span>
-                        <span className="text-xs" style={{ color: "#64748b" }}>
-                          {activity.vendorCount} vendor
-                          {activity.vendorCount !== 1 ? "s" : ""}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <ArrowRight
-                    size={18}
-                    className="text-gray-400 group-hover:text-white group-hover:translate-x-1 transition-all"
-                  />
+                        View all <ArrowUpRight size={14} />
+                    </Link>
                 </div>
-              ))}
-            </div>
-          )}
+
+                <div className="card overflow-hidden">
+                    {loading ? (
+                        <div className="flex justify-center py-16">
+                            <div className="spinner spinner-lg" />
+                        </div>
+                    ) : stats.recentActivity.length === 0 ? (
+                        <div className="empty-state dot-grid">
+                            <p className="display text-2xl">Nothing here yet.</p>
+                            <p className="mt-2 max-w-xs text-sm text-muted">
+                                Describe what you need in a sentence or two and we'll draft the RFP for you.
+                            </p>
+                            <button onClick={() => navigate('/dashboard/rfps?new=1')} className="btn btn-primary mt-6">
+                                Draft your first RFP
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>RFP</th>
+                                        <th>Status</th>
+                                        <th className="text-right">Budget</th>
+                                        <th className="hidden sm:table-cell">Created</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {stats.recentActivity.map((activity) => (
+                                        <tr
+                                            key={activity.id}
+                                            className="row-hover"
+                                            onClick={() => navigate(`/dashboard/rfp/${activity.id}/compare`)}
+                                        >
+                                            <td className="max-w-[280px]">
+                                                <p className="truncate font-medium text-ink">{activity.title}</p>
+                                                <p className="text-xs text-subtle">
+                                                    {activity.vendorCount} vendor{activity.vendorCount !== 1 ? 's' : ''}
+                                                </p>
+                                            </td>
+                                            <td>
+                                                <span className={`badge badge-dot ${statusBadge(activity.status)}`}>
+                                                    {activity.status}
+                                                </span>
+                                            </td>
+                                            <td className="num text-right text-ink">
+                                                {activity.budget ? formatMoney(activity.budget, activity.currency) : '—'}
+                                            </td>
+                                            <td className="hidden text-muted sm:table-cell">{formatDate(activity.date)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            </section>
         </div>
-      </div>
-    </div>
-  );
+    );
 };
 
 export default DashboardHome;

@@ -1,17 +1,24 @@
-import { useState, useEffect } from 'react';
-import { Plus, Send, Eye, Trash2, Clock, DollarSign, Loader2, Users } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Fragment, useState, useEffect } from 'react';
+import { Plus, Send, Trash2, X, ChevronRight, BarChart3 } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getAllRFPs, deleteRFP, getAllVendors, sendRFPToVendors } from '../services/api';
 import CreateRFP from './CreateRFP';
+import { formatDate, formatMoney, getInitials, statusBadge } from '../lib/format';
+
+const FILTERS = ['All', 'Draft', 'Sent', 'Closed'];
 
 const RFPList = () => {
+    const [searchParams, setSearchParams] = useSearchParams();
     const [rfps, setRfps] = useState([]);
     const [vendors, setVendors] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showCreateForm, setShowCreateForm] = useState(false);
+    const composerOpen = showCreateForm || searchParams.get('new') === '1';
     const [selectedRFP, setSelectedRFP] = useState(null);
     const [selectedVendors, setSelectedVendors] = useState([]);
     const [sendingEmail, setSendingEmail] = useState(false);
+    const [filter, setFilter] = useState('All');
+    const [expandedId, setExpandedId] = useState(null);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -59,210 +66,322 @@ const RFPList = () => {
 
         setSendingEmail(true);
         try {
-            await sendRFPToVendors({
+            const response = await sendRFPToVendors({
                 rfpId: selectedRFP._id,
-                vendorIds: selectedVendors
+                vendorIds: selectedVendors,
             });
-            alert('RFP sent successfully!');
+            const failed = (response.data?.results || []).filter((r) => !r.success);
+            alert(
+                failed.length
+                    ? `${response.data.message}.
+Could not reach: ${failed.map((r) => r.vendor).join(', ')}`
+                    : response.data?.message || 'RFP sent successfully!'
+            );
             setSelectedRFP(null);
             setSelectedVendors([]);
             fetchRFPs();
         } catch (error) {
             console.error('Error sending RFP:', error);
-            alert('Failed to send RFP');
+            alert(error.response?.data?.message || 'Failed to send RFP');
         } finally {
             setSendingEmail(false);
         }
     };
 
     const handleVendorToggle = (vendorId) => {
-        setSelectedVendors(prev =>
-            prev.includes(vendorId)
-                ? prev.filter(id => id !== vendorId)
-                : [...prev, vendorId]
+        setSelectedVendors((prev) =>
+            prev.includes(vendorId) ? prev.filter((id) => id !== vendorId) : [...prev, vendorId]
         );
     };
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center py-20">
-                <Loader2 className="animate-spin text-purple-400" size={48} />
-            </div>
-        );
-    }
+    const closeSendModal = () => {
+        setSelectedRFP(null);
+        setSelectedVendors([]);
+    };
+
+    const closeComposer = () => {
+        setShowCreateForm(false);
+        if (searchParams.get('new')) setSearchParams({}, { replace: true });
+    };
+
+    const counts = FILTERS.reduce(
+        (acc, f) => ({ ...acc, [f]: f === 'All' ? rfps.length : rfps.filter((r) => r.status === f).length }),
+        {}
+    );
+    const visible = filter === 'All' ? rfps : rfps.filter((r) => r.status === filter);
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-8 animate-fade-in">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <h1 className="text-3xl font-bold text-white">Request for Proposals</h1>
-                <button
-                    onClick={() => setShowCreateForm(!showCreateForm)}
-                    className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all transform hover:scale-105"
-                >
-                    <Plus size={20} />
-                    <span>New RFP</span>
-                </button>
-            </div>
+            <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                    <h1 className="page-title">Requests for proposal</h1>
+                    <p className="page-subtitle">Draft with AI, send to vendors, compare what comes back.</p>
+                </div>
+                {!composerOpen && (
+                    <button onClick={() => setShowCreateForm(true)} className="btn btn-primary">
+                        <Plus size={15} />
+                        New RFP
+                    </button>
+                )}
+            </header>
 
-            {/* Create RFP Form */}
-            {showCreateForm && (
+            {/* Composer */}
+            {composerOpen && (
                 <CreateRFP
+                    onCancel={closeComposer}
                     onSuccess={() => {
-                        setShowCreateForm(false);
+                        closeComposer();
                         fetchRFPs();
                     }}
                 />
             )}
 
-            {/* RFP List */}
-            {rfps.length === 0 ? (
-                <div className="text-center py-20">
-                    <div className="text-gray-400 text-lg">No RFPs yet. Create your first one!</div>
-                </div>
-            ) : (
-                <div className="grid gap-6">
-                    {rfps.map((rfp) => (
-                        <div
-                            key={rfp._id}
-                            className="bg-gradient-to-br from-slate-800/60 to-purple-900/30 backdrop-blur-sm rounded-xl p-6 border border-purple-500/20 hover:border-purple-500/40 transition-all shadow-xl"
+            {/* List */}
+            <section>
+                <div className="mb-3 flex items-center gap-1 overflow-x-auto">
+                    {FILTERS.map((f) => (
+                        <button
+                            key={f}
+                            onClick={() => setFilter(f)}
+                            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+                                filter === f ? 'bg-surface text-ink ring-1 ring-line' : 'text-muted hover:text-ink'
+                            }`}
                         >
-                            <div className="flex items-start justify-between mb-4">
-                                <div className="flex-1">
-                                    <h3 className="text-xl font-bold text-white mb-2">{rfp.title}</h3>
-                                    <p className="text-gray-300 text-sm mb-4">{rfp.description}</p>
-
-                                    <div className="flex flex-wrap gap-4 text-sm">
-                                        {rfp.budget && (
-                                            <div className="flex items-center space-x-2 text-green-400">
-                                                <DollarSign size={16} />
-                                                <span>{rfp.currency} {rfp.budget.toLocaleString()}</span>
-                                            </div>
-                                        )}
-                                        {rfp.deadline && (
-                                            <div className="flex items-center space-x-2 text-blue-400">
-                                                <Clock size={16} />
-                                                <span>{new Date(rfp.deadline).toLocaleDateString()}</span>
-                                            </div>
-                                        )}
-                                        <div className="flex items-center space-x-2 text-purple-400">
-                                            <Users size={16} />
-                                            <span>{rfp.items?.length || 0} items</span>
-                                        </div>
-                                    </div>
-
-                                    {rfp.items && rfp.items.length > 0 && (
-                                        <div className="mt-4 space-y-2">
-                                            <p className="text-xs text-gray-400 font-semibold">Items:</p>
-                                            <div className="grid gap-2">
-                                                {rfp.items.map((item, idx) => (
-                                                    <div key={idx} className="text-sm text-gray-300 bg-black/20 rounded-lg p-2">
-                                                        <span className="font-medium text-white">{item.name}</span>
-                                                        {item.quantity && <span className="text-gray-400"> × {item.quantity}</span>}
-                                                        {item.specs && <span className="text-gray-400"> - {item.specs}</span>}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="flex items-center space-x-2 ml-4">
-                                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${rfp.status === 'Sent' ? 'bg-green-500/20 text-green-300 border border-green-500/50' :
-                                        rfp.status === 'Closed' ? 'bg-gray-500/20 text-gray-300 border border-gray-500/50' :
-                                            'bg-yellow-500/20 text-yellow-300 border border-yellow-500/50'
-                                        }`}>
-                                        {rfp.status}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div className="flex items-center space-x-3 pt-4 border-t border-purple-500/20">
-                                <button
-                                    onClick={() => setSelectedRFP(rfp)}
-                                    className="flex items-center space-x-2 px-4 py-2 bg-purple-600/30 text-purple-300 rounded-lg hover:bg-purple-600/50 transition-all"
-                                >
-                                    <Send size={16} />
-                                    <span>Send to Vendors</span>
-                                </button>
-                                <button
-                                    onClick={() => navigate(`/dashboard/rfp/${rfp._id}/compare`)}
-                                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600/30 text-blue-300 rounded-lg hover:bg-blue-600/50 transition-all"
-                                >
-                                    <Eye size={16} />
-                                    <span>View Proposals</span>
-                                </button>
-                                <button
-                                    onClick={() => handleDelete(rfp._id)}
-                                    className="flex items-center space-x-2 px-4 py-2 bg-red-600/30 text-red-300 rounded-lg hover:bg-red-600/50 transition-all ml-auto"
-                                >
-                                    <Trash2 size={16} />
-                                    <span>Delete</span>
-                                </button>
-                            </div>
-                        </div>
+                            {f}
+                            <span className="num text-xs text-subtle">{counts[f]}</span>
+                        </button>
                     ))}
                 </div>
-            )}
 
-            {/* Send RFP Modal */}
+                <div className="card overflow-hidden">
+                    {loading ? (
+                        <div className="flex justify-center py-20">
+                            <div className="spinner spinner-lg" />
+                        </div>
+                    ) : visible.length === 0 ? (
+                        <div className="empty-state dot-grid">
+                            <p className="display text-2xl">
+                                {rfps.length === 0 ? 'No RFPs yet.' : `No ${filter.toLowerCase()} RFPs.`}
+                            </p>
+                            <p className="mt-2 max-w-xs text-sm text-muted">
+                                {rfps.length === 0
+                                    ? 'Describe what you need and let AI draft a structured RFP.'
+                                    : 'Try a different filter.'}
+                            </p>
+                            {rfps.length === 0 && !composerOpen && (
+                                <button onClick={() => setShowCreateForm(true)} className="btn btn-primary mt-6">
+                                    <Plus size={15} />
+                                    Draft your first RFP
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th className="w-8 pr-0" />
+                                        <th>Title</th>
+                                        <th>Status</th>
+                                        <th className="text-right">Budget</th>
+                                        <th className="hidden md:table-cell">Deadline</th>
+                                        <th className="hidden text-right sm:table-cell">Items</th>
+                                        <th className="text-right">
+                                            <span className="sr-only">Actions</span>
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {visible.map((rfp) => {
+                                        const expanded = expandedId === rfp._id;
+                                        return (
+                                            <Fragment key={rfp._id}>
+                                                <tr
+                                                    className="row-hover group"
+                                                    onClick={() => setExpandedId(expanded ? null : rfp._id)}
+                                                >
+                                                    <td className="w-8 pr-0 text-subtle">
+                                                        <ChevronRight
+                                                            size={15}
+                                                            className={`transition-transform ${expanded ? 'rotate-90' : ''}`}
+                                                        />
+                                                    </td>
+                                                    <td className="max-w-[320px]">
+                                                        <p className="truncate font-medium text-ink">{rfp.title}</p>
+                                                        {rfp.description && (
+                                                            <p className="truncate text-xs text-subtle">{rfp.description}</p>
+                                                        )}
+                                                    </td>
+                                                    <td>
+                                                        <span className={`badge badge-dot ${statusBadge(rfp.status)}`}>
+                                                            {rfp.status}
+                                                        </span>
+                                                    </td>
+                                                    <td className="num whitespace-nowrap text-right text-ink">
+                                                        {rfp.budget ? formatMoney(rfp.budget, rfp.currency) : '—'}
+                                                    </td>
+                                                    <td className="hidden whitespace-nowrap text-muted md:table-cell">
+                                                        {formatDate(rfp.deadline)}
+                                                    </td>
+                                                    <td className="num hidden text-right text-muted sm:table-cell">
+                                                        {rfp.items?.length || 0}
+                                                    </td>
+                                                    <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                                                        <div className="flex items-center justify-end gap-1">
+                                                            <button
+                                                                onClick={() => setSelectedRFP(rfp)}
+                                                                className="btn btn-secondary btn-sm"
+                                                            >
+                                                                <Send size={13} />
+                                                                <span className="hidden lg:inline">Send</span>
+                                                            </button>
+                                                            <button
+                                                                onClick={() => navigate(`/dashboard/rfp/${rfp._id}/compare`)}
+                                                                className="btn btn-secondary btn-sm"
+                                                            >
+                                                                <BarChart3 size={13} />
+                                                                <span className="hidden lg:inline">Proposals</span>
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleDelete(rfp._id)}
+                                                                className="btn btn-ghost btn-icon h-[1.875rem] w-[1.875rem] hover:bg-danger-soft hover:text-danger"
+                                                                title="Delete"
+                                                                aria-label="Delete RFP"
+                                                            >
+                                                                <Trash2 size={13} />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                                {expanded && (
+                                                    <tr>
+                                                        <td colSpan={7} className="bg-surface-2 px-4 py-4 sm:pl-12">
+                                                            {rfp.description && (
+                                                                <p className="mb-3 max-w-3xl text-[13px] leading-relaxed text-muted">
+                                                                    {rfp.description}
+                                                                </p>
+                                                            )}
+                                                            {rfp.items?.length > 0 ? (
+                                                                <div className="overflow-hidden rounded-lg border border-line bg-surface">
+                                                                    <table className="data-table">
+                                                                        <thead>
+                                                                            <tr>
+                                                                                <th>Item</th>
+                                                                                <th className="text-right">Qty</th>
+                                                                                <th>Specs</th>
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {rfp.items.map((item, idx) => (
+                                                                                <tr key={idx}>
+                                                                                    <td className="font-medium text-ink">{item.name}</td>
+                                                                                    <td className="num text-right text-muted">
+                                                                                        {item.quantity ?? '—'}
+                                                                                    </td>
+                                                                                    <td className="text-muted">{item.specs || '—'}</td>
+                                                                                </tr>
+                                                                            ))}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            ) : (
+                                                                <p className="text-[13px] text-subtle">No line items.</p>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </Fragment>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            </section>
+
+            {/* Send RFP modal */}
             {selectedRFP && (
-                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-gradient-to-br from-slate-800 to-purple-900 rounded-2xl p-6 max-w-2xl w-full border border-purple-500/30 shadow-2xl max-h-[80vh] overflow-y-auto">
-                        <h3 className="text-2xl font-bold text-white mb-4">Send RFP to Vendors</h3>
-                        <p className="text-gray-300 mb-6">Select vendors to receive: <span className="font-semibold text-purple-400">{selectedRFP.title}</span></p>
+                <div className="modal-backdrop" onClick={closeSendModal}>
+                    <div className="modal flex max-w-lg flex-col" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-6">
+                            <div className="min-w-0">
+                                <p className="eyebrow">Send RFP</p>
+                                <h3 className="display mt-1 truncate text-2xl">{selectedRFP.title}</h3>
+                            </div>
+                            <button onClick={closeSendModal} className="btn btn-ghost btn-icon -mr-2" aria-label="Close">
+                                <X size={16} />
+                            </button>
+                        </div>
 
-                        <div className="space-y-3 mb-6">
+                        <div className="flex-1 overflow-y-auto border-y border-line">
                             {vendors.length === 0 ? (
-                                <p className="text-gray-400">No vendors available. Please add vendors first.</p>
-                            ) : (
-                                vendors.map((vendor) => (
-                                    <label
-                                        key={vendor._id}
-                                        className="flex items-center space-x-3 p-4 bg-black/30 rounded-lg border border-purple-500/20 hover:border-purple-500/40 cursor-pointer transition-all"
+                                <div className="px-6 py-10 text-center">
+                                    <p className="text-sm text-muted">No vendors yet.</p>
+                                    <button
+                                        onClick={() => navigate('/dashboard/vendors')}
+                                        className="btn btn-secondary btn-sm mt-3"
                                     >
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedVendors.includes(vendor._id)}
-                                            onChange={() => handleVendorToggle(vendor._id)}
-                                            className="w-5 h-5 rounded border-purple-500 text-purple-600 focus:ring-purple-500 focus:ring-offset-slate-900"
-                                        />
-                                        <div className="flex-1">
-                                            <p className="font-semibold text-white">{vendor.name}</p>
-                                            <p className="text-sm text-gray-400">{vendor.email}</p>
-                                        </div>
-                                    </label>
-                                ))
+                                        Add vendors
+                                    </button>
+                                </div>
+                            ) : (
+                                <ul className="divide-y divide-line">
+                                    {vendors.map((vendor) => {
+                                        const checked = selectedVendors.includes(vendor._id);
+                                        return (
+                                            <li key={vendor._id}>
+                                                <label
+                                                    className={`flex cursor-pointer items-center gap-3 px-6 py-3 transition-colors ${
+                                                        checked ? 'bg-accent-soft/50' : 'hover:bg-surface-2'
+                                                    }`}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={checked}
+                                                        onChange={() => handleVendorToggle(vendor._id)}
+                                                        className="checkbox"
+                                                    />
+                                                    <span className="avatar">{getInitials(vendor.name)}</span>
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="block text-[13px] font-medium text-ink">
+                                                            {vendor.name}
+                                                        </span>
+                                                        <span className="block truncate text-xs text-subtle">
+                                                            {vendor.email}
+                                                        </span>
+                                                    </span>
+                                                    {vendor.category && (
+                                                        <span className="badge badge-neutral hidden sm:inline-flex">
+                                                            {vendor.category}
+                                                        </span>
+                                                    )}
+                                                </label>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
                             )}
                         </div>
 
-                        <div className="flex items-center space-x-3">
-                            <button
-                                onClick={handleSendRFP}
-                                disabled={sendingEmail || selectedVendors.length === 0}
-                                className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center space-x-2"
-                            >
-                                {sendingEmail ? (
-                                    <>
-                                        <Loader2 className="animate-spin" size={20} />
-                                        <span>Sending...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Send size={20} />
-                                        <span>Send RFP ({selectedVendors.length} vendors)</span>
-                                    </>
-                                )}
-                            </button>
-                            <button
-                                onClick={() => {
-                                    setSelectedRFP(null);
-                                    setSelectedVendors([]);
-                                }}
-                                className="px-6 py-3 bg-gray-600/50 text-white rounded-lg hover:bg-gray-600/70 transition-all"
-                            >
-                                Cancel
-                            </button>
+                        <div className="flex items-center justify-between gap-3 px-6 py-4">
+                            <span className="num text-xs text-subtle">
+                                {selectedVendors.length} of {vendors.length} selected
+                            </span>
+                            <div className="flex gap-2">
+                                <button onClick={closeSendModal} className="btn btn-secondary">
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSendRFP}
+                                    disabled={sendingEmail || selectedVendors.length === 0}
+                                    className="btn btn-accent"
+                                >
+                                    {sendingEmail ? <div className="spinner spinner-light h-3.5 w-3.5" /> : <Send size={14} />}
+                                    {sendingEmail ? 'Sending…' : 'Send RFP'}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

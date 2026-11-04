@@ -1,32 +1,31 @@
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Home, FileText, Users, LogOut, User, Menu, X, AlertTriangle } from 'lucide-react';
+import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import { LayoutGrid, FileText, Building2, LogOut, Menu, X, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useState } from 'react';
 import DashboardHome from '../components/DashboardHome';
 import RFPList from '../components/RFPList';
 import VendorManagement from '../components/VendorManagement';
 import ProposalComparison from '../components/ProposalComparison';
+import Logo from '../components/Logo';
+import { getInitials } from '../lib/format';
+
+const navigation = [
+    { name: 'Overview', path: '/dashboard', icon: LayoutGrid },
+    { name: 'RFPs', path: '/dashboard/rfps', icon: FileText },
+    { name: 'Vendors', path: '/dashboard/vendors', icon: Building2 },
+];
 
 const Dashboard = () => {
     const location = useLocation();
+    const navigate = useNavigate();
     const { user, logout } = useAuth();
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [showLogoutModal, setShowLogoutModal] = useState(false);
 
-    const navigation = [
-        { name: 'Dashboard', path: '/dashboard', icon: Home },
-        { name: 'RFPs', path: '/dashboard/rfps', icon: FileText },
-        { name: 'Vendors', path: '/dashboard/vendors', icon: Users },
-    ];
-
     const isActive = (path) => {
-        if (path === '/dashboard' && location.pathname === '/dashboard') return true;
-        if (path !== '/dashboard' && location.pathname.startsWith(path)) return true;
-        return false;
-    };
-
-    const handleLogout = () => {
-        setShowLogoutModal(true);
+        if (path === '/dashboard') return location.pathname === '/dashboard' || location.pathname === '/dashboard/';
+        if (path === '/dashboard/rfps') return location.pathname.startsWith('/dashboard/rfp');
+        return location.pathname.startsWith(path);
     };
 
     const confirmLogout = () => {
@@ -34,126 +33,106 @@ const Dashboard = () => {
         logout();
     };
 
-    return (
-        <div className="min-h-screen relative overflow-hidden">
-            {/* Animated background blobs */}
-            <div className="bg-blob top-20 left-20 w-96 h-96" style={{ background: '#06b6d4' }} />
-            <div className="bg-blob top-40 right-20 w-80 h-80 animation-delay-400" style={{ background: '#f97316' }} />
-            <div className="bg-blob bottom-20 left-1/3 w-72 h-72 animation-delay-600" style={{ background: '#06b6d4' }} />
+    const closeMenu = () => setMobileMenuOpen(false);
 
-            {/* Navbar */}
-            <nav className="sticky top-0 z-50 bg-slate-950/50 backdrop-blur-xl border-b border-white/10">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex items-center justify-between h-16">
-                        {/* Logo */}
-                        <Link to="/" className="flex items-center space-x-3 group">
-                            <div className="relative">
-                                <div className="absolute inset-0 rounded-xl blur opacity-75 group-hover:opacity-100 transition-opacity" style={{ background: 'linear-gradient(135deg, #06b6d4, #f97316)' }}></div>
-                                <div className="relative p-2 rounded-xl bg-white/10 backdrop-blur-sm">
-                                    <img src="/logo.jpg" alt="AI RFP Manager" className="w-8 h-8 object-contain" />
-                                </div>
-                            </div>
-                            <span className="text-xl font-bold gradient-text hidden sm:block">
-                                AI RFP Manager
-                            </span>
-                        </Link>
+    const sidebar = (
+        <div className="flex h-full flex-col">
+            <div className="flex h-14 items-center px-4">
+                <Logo to="/dashboard" />
+            </div>
 
-                        {/* Desktop Navigation */}
-                        <div className="hidden md:flex items-center space-x-2">
-                            {navigation.map((item) => {
-                                const Icon = item.icon;
-                                return (
-                                    <Link
-                                        key={item.path}
-                                        to={item.path}
-                                        className={`flex items-center space-x-2 px-4 py-2 rounded-xl font-medium transition-all ${isActive(item.path)
-                                            ? 'text-white'
-                                            : 'text-gray-300 hover:bg-white/5 hover:text-white'
-                                            }`}
-                                        style={isActive(item.path) ? {
-                                            background: 'linear-gradient(135deg, #06b6d4, #f97316)',
-                                            boxShadow: '0 0 20px rgba(6, 182, 212, 0.3)'
-                                        } : {}}
-                                    >
-                                        <Icon size={18} />
-                                        <span>{item.name}</span>
-                                    </Link>
-                                );
-                            })}
-                        </div>
+            <div className="px-3 pt-2">
+                <button
+                    onClick={() => {
+                        closeMenu();
+                        navigate('/dashboard/rfps?new=1');
+                    }}
+                    className="btn btn-primary w-full justify-between"
+                >
+                    <span className="flex items-center gap-2">
+                        <Plus size={15} />
+                        New RFP
+                    </span>
+                    <span className="font-mono text-[11px] text-white/50">AI</span>
+                </button>
+            </div>
 
-                        {/* User Menu (Desktop) */}
-                        <div className="hidden md:flex items-center space-x-4">
-                            <div className="flex items-center space-x-3 px-2 py-2 ">
-                                <div className="p-1.5 rounded-lg" style={{ background: 'linear-gradient(135deg, #06b6d4, #f97316)' }}>
-                                    <User size={14} className="text-white" />
-                                </div>
-                                <span className="text-sm font-medium text-white">{user?.name}</span>
-                            </div>
-                            <button
-                                onClick={handleLogout}
-                                className="flex items-center space-x-2 px-4 py-2 text-gray-300 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
-                            >
-                                <LogOut size={18} />
-                                <span>Logout</span>
-                            </button>
-                        </div>
-
-                        {/* Mobile menu button */}
-                        <button
-                            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                            className="md:hidden p-2 text-gray-300 hover:text-white rounded-lg hover:bg-white/5"
+            <nav className="mt-6 flex-1 space-y-0.5 px-3">
+                <p className="eyebrow mb-2 px-2">Workspace</p>
+                {navigation.map((item) => {
+                    const Icon = item.icon;
+                    const active = isActive(item.path);
+                    return (
+                        <Link
+                            key={item.path}
+                            to={item.path}
+                            onClick={closeMenu}
+                            className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] font-medium transition-colors ${
+                                active
+                                    ? 'bg-surface text-ink shadow-[0_1px_2px_rgba(19,41,75,0.08)] ring-1 ring-line'
+                                    : 'text-muted hover:bg-surface-3 hover:text-ink'
+                            }`}
                         >
-                            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-                        </button>
-                    </div>
-                </div>
-
-                {/* Mobile Navigation */}
-                {mobileMenuOpen && (
-                    <div className="md:hidden border-t border-white/10 bg-slate-950/90 backdrop-blur-xl">
-                        <div className="px-4 py-4 space-y-2">
-                            {navigation.map((item) => {
-                                const Icon = item.icon;
-                                return (
-                                    <Link
-                                        key={item.path}
-                                        to={item.path}
-                                        onClick={() => setMobileMenuOpen(false)}
-                                        className={`flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${isActive(item.path)
-                                            ? 'text-white'
-                                            : 'text-gray-300 hover:bg-white/5'
-                                            }`}
-                                        style={isActive(item.path) ? {
-                                            background: 'linear-gradient(135deg, #06b6d4, #f97316)',
-                                            boxShadow: '0 0 20px rgba(6, 182, 212, 0.3)'
-                                        } : {}}
-                                    >
-                                        <Icon size={20} />
-                                        <span>{item.name}</span>
-                                    </Link>
-                                );
-                            })}
-                            <div className="pt-4 border-t border-white/10">
-                                <div className="flex items-center space-x-3 px-4 py-3 glass-card mb-2">
-                                    <User size={18} />
-                                    <span className="text-sm">{user?.name}</span>
-                                </div>
-                                <button
-                                    onClick={handleLogout}
-                                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
-                                >
-                                    <LogOut size={18} />
-                                    <span>Logout</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                            <Icon size={15} className={active ? 'text-accent' : 'text-subtle'} />
+                            {item.name}
+                        </Link>
+                    );
+                })}
             </nav>
 
-            {/* Main Content */}
-            <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div className="border-t border-line p-3">
+                <div className="flex items-center gap-2.5 px-1">
+                    <span className="avatar h-8 w-8 bg-surface">{getInitials(user?.name)}</span>
+                    <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-medium text-ink">{user?.name}</p>
+                        <p className="truncate text-xs text-subtle">{user?.company || user?.email}</p>
+                    </div>
+                    <button
+                        onClick={() => {
+                            closeMenu();
+                            setShowLogoutModal(true);
+                        }}
+                        className="btn btn-ghost btn-icon"
+                        title="Log out"
+                        aria-label="Log out"
+                    >
+                        <LogOut size={15} />
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="min-h-screen lg:pl-60">
+            {/* Desktop sidebar */}
+            <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-line bg-canvas lg:block">
+                {sidebar}
+            </aside>
+
+            {/* Mobile top bar */}
+            <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-canvas/90 px-4 backdrop-blur lg:hidden">
+                <Logo to="/dashboard" />
+                <button onClick={() => setMobileMenuOpen(true)} className="btn btn-ghost btn-icon" aria-label="Open menu">
+                    <Menu size={18} />
+                </button>
+            </header>
+
+            {/* Mobile drawer */}
+            {mobileMenuOpen && (
+                <>
+                    <div className="drawer-backdrop lg:hidden" onClick={closeMenu} />
+                    <aside className="fixed inset-y-0 left-0 z-50 w-64 border-r border-line bg-canvas shadow-2xl animate-fade-in lg:hidden">
+                        <button onClick={closeMenu} className="btn btn-ghost btn-icon absolute right-3 top-3" aria-label="Close menu">
+                            <X size={16} />
+                        </button>
+                        {sidebar}
+                    </aside>
+                </>
+            )}
+
+            {/* Main content */}
+            <main className="mx-auto max-w-6xl px-4 py-8 sm:px-8 lg:py-10">
                 <Routes>
                     <Route path="/" element={<DashboardHome />} />
                     <Route path="/rfps" element={<RFPList />} />
@@ -162,67 +141,19 @@ const Dashboard = () => {
                 </Routes>
             </main>
 
-            {/* Logout Confirmation Modal */}
+            {/* Logout confirmation */}
             {showLogoutModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
-                    {/* Backdrop */}
-                    <div
-                        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                        onClick={() => setShowLogoutModal(false)}
-                    ></div>
-
-                    {/* Modal */}
-                    <div className="relative w-full max-w-md animate-scale-in">
-                        <div className="glass-card shadow-large">
-                            {/* Icon */}
-                            <div className="flex justify-center mb-6">
-                                <div className="relative">
-                                    <div className="absolute inset-0 rounded-full blur-xl opacity-50" style={{ background: '#ef4444' }}></div>
-                                    <div className="relative p-4 rounded-full" style={{ background: 'rgba(239, 68, 68, 0.15)', border: '2px solid rgba(239, 68, 68, 0.3)' }}>
-                                        <AlertTriangle size={48} style={{ color: '#fca5a5' }} />
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Content */}
-                            <div className="text-center mb-8">
-                                <h2 className="text-2xl font-bold mb-3" style={{ color: '#e2e8f0' }}>
-                                    Confirm Logout
-                                </h2>
-                                <p className="text-base" style={{ color: '#94a3b8' }}>
-                                    Are you sure you want to logout? You'll need to sign in again to access your dashboard.
-                                </p>
-                            </div>
-
-                            {/* Actions */}
-                            <div className="flex gap-3">
-                                <button
-                                    onClick={() => setShowLogoutModal(false)}
-                                    className="flex-1 btn-secondary"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={confirmLogout}
-                                    className="flex-1 font-medium rounded-xl transition-all"
-                                    style={{
-                                        background: 'linear-gradient(135deg, #ef4444, #dc2626)',
-                                        color: 'white',
-                                        padding: '0.875rem 2rem',
-                                        boxShadow: '0 4px 16px rgba(239, 68, 68, 0.3)'
-                                    }}
-                                    onMouseEnter={(e) => {
-                                        e.currentTarget.style.transform = 'translateY(-2px)';
-                                        e.currentTarget.style.boxShadow = '0 6px 24px rgba(239, 68, 68, 0.4)';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        e.currentTarget.style.transform = 'translateY(0)';
-                                        e.currentTarget.style.boxShadow = '0 4px 16px rgba(239, 68, 68, 0.3)';
-                                    }}
-                                >
-                                    Logout
-                                </button>
-                            </div>
+                <div className="modal-backdrop" onClick={() => setShowLogoutModal(false)}>
+                    <div className="modal max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+                        <h2 className="display text-2xl">Log out?</h2>
+                        <p className="mt-2 text-sm text-muted">You'll need to sign in again to get back to your workspace.</p>
+                        <div className="mt-6 flex justify-end gap-2">
+                            <button onClick={() => setShowLogoutModal(false)} className="btn btn-secondary">
+                                Cancel
+                            </button>
+                            <button onClick={confirmLogout} className="btn btn-danger">
+                                Log out
+                            </button>
                         </div>
                     </div>
                 </div>

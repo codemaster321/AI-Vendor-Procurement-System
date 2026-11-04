@@ -4,18 +4,16 @@ const ErrorMessage = ({ message, onDismiss }) => {
     if (!message) return null;
 
     return (
-        <div className="mb-6 p-4 rounded-xl flex items-start justify-between animate-slide-down"
-            style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.5)' }}>
-            <div className="flex items-start space-x-3">
-                <AlertCircle className="flex-shrink-0 mt-0.5" size={20} style={{ color: '#fca5a5' }} />
-                <p className="text-sm" style={{ color: '#fca5a5' }}>{message}</p>
-            </div>
+        <div className="alert alert-error mb-6 animate-fade-in">
+            <AlertCircle className="mt-0.5 shrink-0" size={16} />
+            <p className="flex-1">{message}</p>
             {onDismiss && (
                 <button
                     onClick={onDismiss}
-                    className="text-red-400 hover:text-red-300 transition-colors"
+                    className="opacity-70 transition-opacity hover:opacity-100"
+                    aria-label="Dismiss"
                 >
-                    <X size={18} />
+                    <X size={16} />
                 </button>
             )}
         </div>
